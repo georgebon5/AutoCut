@@ -1,0 +1,17 @@
+ingest:
+  target_fps: 30
+  audio_sample_rate: 16000
+
+vad:
+  threshold: 0.5
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 100
+
+silence:
+  min_silence: 0.5       # gaps longer than this (seconds) are cut
+  padding: 0.1           # seconds of speech kept on each side of a cut
+
+render:
+  audio_crossfade_ms: 10
+  crf: 18
+  preset: fast
