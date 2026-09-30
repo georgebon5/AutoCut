@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Output files (large; never commit)
+output/
+*.mp4
+*.mov
+*.wav
+*.ass
+*.srt
+edl.json
+
+# Config overrides
+config/local.yaml
+
+# Tools
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store

@@ -10,8 +10,8 @@ from typing import Any, Literal, Optional
 class ProxyInfo:
     clip_id: str
     original_path: Path
-    proxy_path: Path        # CFR H.264 proxy
-    audio_path: Path        # 16 kHz mono WAV
+    proxy_path: Path            # CFR H.264 proxy
+    audio_path: Optional[Path]  # 16 kHz mono WAV; None if clip has no audio stream
     duration: float         # seconds
     fps: float
     width: int
