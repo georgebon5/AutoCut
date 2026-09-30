@@ -37,4 +37,7 @@ packages = ["autocut"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m 'not slow'"
+markers = [
+    "slow: integration tests that require model downloads or long processing",
+]
