@@ -10,12 +10,12 @@ import torch
 from click.testing import CliRunner
 
 from autocut.cli import cli
-from autocut.models import SpeechRegion
+from autocut.models import SpeechRegion, Transcript
 from tests.conftest import make_clip, skip_no_ffmpeg
 
 
 # ---------------------------------------------------------------------------
-# Minimal fake VAD for deterministic E2E tests
+# Minimal fakes for deterministic E2E tests (no model downloads)
 # ---------------------------------------------------------------------------
 
 class _FakeModel:
@@ -38,13 +38,31 @@ def _fake_load_vad():
     return _FakeModel(), _fake_get_ts
 
 
+class _FakeWhisperModel:
+    pass
+
+
+def _fake_load_whisper(cfg):
+    return _FakeWhisperModel()
+
+
+def _fake_transcribe(audio_path, speech_regions, clip_id, cfg, model=None):
+    return Transcript(clip_id=clip_id, language="el", words=[])
+
+
+def _patch_pipeline(monkeypatch):
+    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    monkeypatch.setattr("autocut.cli.load_whisper_model", _fake_load_whisper)
+    monkeypatch.setattr("autocut.cli.transcribe_clip", _fake_transcribe)
+
+
 # ---------------------------------------------------------------------------
-# Unit-level CLI tests (monkeypatched VAD, no Silero download)
+# Unit-level CLI tests (monkeypatched VAD + Whisper, no model downloads)
 # ---------------------------------------------------------------------------
 
 @skip_no_ffmpeg
 def test_ingest_command_exits_zero(tmp_path, monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     result = runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -53,7 +71,7 @@ def test_ingest_command_exits_zero(tmp_path, monkeypatch):
 
 @skip_no_ffmpeg
 def test_ingest_produces_rough_cut_mp4(tmp_path, monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -62,7 +80,7 @@ def test_ingest_produces_rough_cut_mp4(tmp_path, monkeypatch):
 
 @skip_no_ffmpeg
 def test_ingest_produces_edl_json(tmp_path, monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -75,7 +93,7 @@ def test_ingest_produces_edl_json(tmp_path, monkeypatch):
 @skip_no_ffmpeg
 def test_ingest_edl_has_cut_segments(tmp_path, monkeypatch):
     """The 1-second silence gap from _fake_get_ts must appear as a cut segment."""
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -87,7 +105,7 @@ def test_ingest_edl_has_cut_segments(tmp_path, monkeypatch):
 @skip_no_ffmpeg
 def test_ingest_no_cut_overlaps_speech_region(tmp_path, monkeypatch):
     """No cut segment should overlap a detected speech region."""
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -110,7 +128,7 @@ def test_ingest_no_cut_overlaps_speech_region(tmp_path, monkeypatch):
 
 @skip_no_ffmpeg
 def test_ingest_output_reports_runtime(tmp_path, monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     result = runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -119,7 +137,7 @@ def test_ingest_output_reports_runtime(tmp_path, monkeypatch):
 
 @skip_no_ffmpeg
 def test_ingest_multi_clip(tmp_path, monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip_a = make_clip(tmp_path / "a.mp4", duration=4.0)
     clip_b = make_clip(tmp_path / "b.mp4", duration=4.0)
     runner = CliRunner()
@@ -134,7 +152,7 @@ def test_ingest_multi_clip(tmp_path, monkeypatch):
 @skip_no_ffmpeg
 def test_ingest_silent_clip_treated_as_broll(tmp_path, monkeypatch):
     """A clip with no audio should succeed (B-roll path)."""
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "broll.mp4", duration=4.0, with_audio=False)
     runner = CliRunner()
     result = runner.invoke(
@@ -149,7 +167,7 @@ def test_ingest_silent_clip_treated_as_broll(tmp_path, monkeypatch):
 def test_ingest_no_av_drift(tmp_path, monkeypatch):
     """Audio and video stream durations in the output must be within 200 ms."""
     import subprocess
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    _patch_pipeline(monkeypatch)
     clip = make_clip(tmp_path / "clip.mp4", duration=8.0)
     runner = CliRunner()
     runner.invoke(cli, ["ingest", str(clip), "--output-dir", str(tmp_path / "out")])
@@ -170,6 +188,21 @@ def test_ingest_no_av_drift(tmp_path, monkeypatch):
     )
 
 
+@skip_no_ffmpeg
+def test_ingest_no_transcribe_flag(tmp_path, monkeypatch):
+    """--no-transcribe must skip Whisper and still produce output."""
+    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["ingest", str(clip), "--no-transcribe", "--output-dir", str(tmp_path / "out")],
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "out" / "rough_cut.mp4").exists()
+    assert "Transcrib" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # Slow / real-Silero E2E (optional; run with pytest -m slow)
 # ---------------------------------------------------------------------------
@@ -177,7 +210,7 @@ def test_ingest_no_av_drift(tmp_path, monkeypatch):
 @pytest.mark.slow
 @skip_no_ffmpeg
 def test_e2e_with_real_silero(tmp_path):
-    """Full pipeline with the real Silero VAD model (requires download)."""
+    """Full pipeline with real Silero VAD + Whisper (requires model downloads)."""
     clip = make_clip(tmp_path / "clip.mp4", duration=10.0)
     runner = CliRunner()
     result = runner.invoke(

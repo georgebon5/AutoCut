@@ -8,9 +8,10 @@ import click
 from autocut.config import load_config
 from autocut.edl import EDL, save_edl
 from autocut.ingest import IngestError, ingest_clips
-from autocut.models import SpeechRegion, Segment
+from autocut.models import Segment, SpeechRegion, Transcript
 from autocut.render import RenderError, render
 from autocut.silence import apply_silence_removal
+from autocut.transcribe import load_whisper_model, transcribe_clip
 from autocut.vad import detect_speech, load_vad_model
 
 
@@ -38,18 +39,26 @@ def cli(ctx: click.Context, config: Path | None) -> None:
 @click.option("--output-dir", "-o",
               type=click.Path(path_type=Path), default=Path("output"),
               show_default=True)
+@click.option("--no-transcribe", is_flag=True,
+              help="Skip Whisper transcription (cuts use VAD boundaries only).")
 @click.pass_context
-def ingest(ctx: click.Context, clips: tuple[Path, ...], output_dir: Path) -> None:
-    """Normalize clips, detect speech, remove silences, and render a rough cut.
+def ingest(
+    ctx: click.Context,
+    clips: tuple[Path, ...],
+    output_dir: Path,
+    no_transcribe: bool,
+) -> None:
+    """Normalize clips, detect speech, transcribe, remove silences, render.
 
     CLIPS: one or more video files (VFR, HEVC, HDR all accepted).
     """
     cfg = ctx.obj["config"]
     t0 = time.perf_counter()
+    n_steps = 5 if no_transcribe else 6
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
 
     # ── 1. Ingest ────────────────────────────────────────────────────────────
-    click.echo("[1/5] Ingesting clips (normalising to CFR proxy + 16 kHz audio)...")
+    click.echo(f"[1/{n_steps}] Ingesting clips (normalising to CFR proxy + 16 kHz audio)...")
     try:
         proxies = ingest_clips(list(clips), output_dir, cfg.ingest)
     except IngestError as e:
@@ -62,8 +71,8 @@ def ingest(ctx: click.Context, clips: tuple[Path, ...], output_dir: Path) -> Non
         )
 
     # ── 2. VAD ───────────────────────────────────────────────────────────────
-    click.echo("\n[2/5] VAD: detecting speech regions...")
-    model, get_ts = load_vad_model()
+    click.echo(f"\n[2/{n_steps}] VAD: detecting speech regions...")
+    vad_model, get_ts = load_vad_model()
 
     all_regions: dict[str, list[SpeechRegion]] = {}
     for proxy in proxies:
@@ -73,7 +82,7 @@ def ingest(ctx: click.Context, clips: tuple[Path, ...], output_dir: Path) -> Non
             continue
         regions = detect_speech(
             proxy.audio_path, proxy.clip_id, cfg.vad,
-            model=model, get_timestamps=get_ts,
+            model=vad_model, get_timestamps=get_ts,
         )
         all_regions[proxy.clip_id] = regions
         speech_s = sum(r.end - r.start for r in regions)
@@ -83,22 +92,48 @@ def ingest(ctx: click.Context, clips: tuple[Path, ...], output_dir: Path) -> Non
             f"({_fmt(speech_s)} speech / {_fmt(silence_s)} silence)"
         )
 
-    # ── 3. Silence removal ───────────────────────────────────────────────────
-    click.echo("\n[3/5] Applying silence removal...")
+    # ── 3. Transcribe (optional) ─────────────────────────────────────────────
+    all_transcripts: dict[str, Transcript] = {}
+    if not no_transcribe:
+        click.echo(f"\n[3/{n_steps}] Transcribing speech (faster-whisper {cfg.transcribe.model_size})...")
+        whisper = load_whisper_model(cfg.transcribe)
+        for proxy in proxies:
+            if proxy.audio_path is None:
+                all_transcripts[proxy.clip_id] = Transcript(
+                    clip_id=proxy.clip_id, language=cfg.transcribe.language, words=[]
+                )
+                continue
+            t = transcribe_clip(
+                proxy.audio_path,
+                all_regions[proxy.clip_id],
+                proxy.clip_id,
+                cfg.transcribe,
+                model=whisper,
+            )
+            all_transcripts[proxy.clip_id] = t
+            click.echo(f"    {proxy.clip_id}: {len(t.words)} words  [{t.language}]")
+
+    # ── 4. Silence removal ───────────────────────────────────────────────────
+    step = 4 if not no_transcribe else 3
+    click.echo(f"\n[{step}/{n_steps}] Applying silence removal...")
     all_segments: list[Segment] = []
     for proxy in proxies:
+        word_ts = (
+            all_transcripts[proxy.clip_id].to_snap_format()
+            if proxy.clip_id in all_transcripts else []
+        )
         segs = apply_silence_removal(
             all_regions[proxy.clip_id],
             proxy.clip_id,
             proxy.duration,
             cfg.silence,
+            word_timestamps=word_ts or None,
         )
         all_segments.extend(segs)
         n_cut = sum(1 for s in segs if s.decision == "cut")
         removed = sum(s.duration for s in segs if s.decision == "cut")
         click.echo(
-            f"    {proxy.clip_id}: {n_cut} cut(s), "
-            f"{_fmt(removed)} removed"
+            f"    {proxy.clip_id}: {n_cut} cut(s), {_fmt(removed)} removed"
         )
 
     dur_kept = sum(s.duration for s in all_segments if s.decision == "keep")
@@ -106,17 +141,23 @@ def ingest(ctx: click.Context, clips: tuple[Path, ...], output_dir: Path) -> Non
     pct = 100 * dur_kept / dur_total if dur_total else 0
     click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
 
-    # ── 4. Render ─────────────────────────────────────────────────────────────
-    click.echo("\n[4/5] Rendering rough_cut.mp4...")
+    # ── 5. Render ─────────────────────────────────────────────────────────────
+    step = 5 if not no_transcribe else 4
+    click.echo(f"\n[{step}/{n_steps}] Rendering rough_cut.mp4...")
     try:
         output_mp4 = render(proxies, all_segments, output_dir, cfg.render)
     except RenderError as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"    → {output_mp4}")
 
-    # ── 5. EDL ───────────────────────────────────────────────────────────────
-    click.echo("\n[5/5] Saving EDL (decision list)...")
-    edl = EDL(clips=proxies, segments=all_segments)
+    # ── 6. EDL ───────────────────────────────────────────────────────────────
+    step = 6 if not no_transcribe else 5
+    click.echo(f"\n[{step}/{n_steps}] Saving EDL (decision list + transcript)...")
+    edl = EDL(
+        clips=proxies,
+        segments=all_segments,
+        transcripts=list(all_transcripts.values()),
+    )
     edl_path = output_dir / "edl.json"
     save_edl(edl, edl_path)
     click.echo(f"    → {edl_path}")

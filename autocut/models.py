@@ -44,8 +44,37 @@ class Segment:
 
 
 @dataclass
+class WordTimestamp:
+    word: str
+    start: float       # seconds from clip start
+    end: float
+    probability: float
+    clip_id: str
+
+
+@dataclass
+class Transcript:
+    clip_id: str
+    language: str
+    words: list[WordTimestamp]
+
+    @property
+    def text(self) -> str:
+        return " ".join(w.word for w in self.words)
+
+    def words_in_range(self, start: float, end: float) -> list[WordTimestamp]:
+        """Words whose start falls within [start, end]."""
+        return [w for w in self.words if start <= w.start <= end]
+
+    def to_snap_format(self) -> list[dict]:
+        """Convert to the list[dict] format expected by _snap_to_word_boundary."""
+        return [{"word": w.word, "start": w.start, "end": w.end} for w in self.words]
+
+
+@dataclass
 class EDL:
     clips: list[ProxyInfo]
     segments: list[Segment]
+    transcripts: list[Transcript] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0"

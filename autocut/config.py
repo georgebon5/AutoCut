@@ -28,11 +28,19 @@ class RenderConfig(BaseModel):
     preset: str = "fast"
 
 
+class TranscribeConfig(BaseModel):
+    model_size: str = "medium"
+    language: str = "el"
+    compute_type: str = "int8"
+    beam_size: int = 5
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
     silence: SilenceConfig = Field(default_factory=SilenceConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
+    transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"

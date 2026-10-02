@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from autocut.models import EDL, ProxyInfo, Segment
+from autocut.models import EDL, ProxyInfo, Segment, Transcript, WordTimestamp
 
 
 # ---------------------------------------------------------------------------
@@ -73,10 +73,29 @@ def _segment_from_dict(d: dict) -> Segment:
     )
 
 
+def _word_from_dict(d: dict) -> WordTimestamp:
+    return WordTimestamp(
+        word=d["word"],
+        start=d["start"],
+        end=d["end"],
+        probability=d["probability"],
+        clip_id=d["clip_id"],
+    )
+
+
+def _transcript_from_dict(d: dict) -> Transcript:
+    return Transcript(
+        clip_id=d["clip_id"],
+        language=d["language"],
+        words=[_word_from_dict(w) for w in d.get("words", [])],
+    )
+
+
 def edl_from_dict(data: dict) -> EDL:
     return EDL(
         clips=[_proxy_from_dict(c) for c in data["clips"]],
         segments=[_segment_from_dict(s) for s in data["segments"]],
+        transcripts=[_transcript_from_dict(t) for t in data.get("transcripts", [])],
         created_at=datetime.fromisoformat(data["created_at"]),
         version=data.get("version", "1.0"),
     )
