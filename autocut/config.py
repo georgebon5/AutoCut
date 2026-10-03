@@ -50,6 +50,14 @@ class TakesConfig(BaseModel):
     min_words: int = 3                  # minimum words per take to qualify
 
 
+class CaptionConfig(BaseModel):
+    formats: list[str] = Field(default_factory=lambda: ["srt", "ass"])
+    max_words: int = 5           # maximum words per caption group
+    max_duration_s: float = 3.0  # maximum caption display duration (seconds)
+    min_gap_s: float = 0.4       # silence gap that forces a new caption group
+    style: str = "tiktok"        # ASS style preset ("tiktok" or "default")
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
@@ -58,6 +66,7 @@ class AutoCutConfig(BaseModel):
     transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)
+    captions: CaptionConfig = Field(default_factory=CaptionConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"

@@ -41,3 +41,10 @@ takes:
   similarity_threshold: 0.85
   min_gap_s: 0.5
   min_words: 3
+
+captions:
+  formats: [srt, ass]
+  max_words: 5
+  max_duration_s: 3.0
+  min_gap_s: 0.4
+  style: tiktok

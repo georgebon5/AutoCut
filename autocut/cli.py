@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from autocut.captions import write_captions
 from autocut.config import load_config
 from autocut.edl import EDL, save_edl
 from autocut.fillers import detect_fillers, punch_out_fillers
@@ -47,6 +48,8 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="Skip filler-word detection.")
 @click.option("--no-takes", is_flag=True,
               help="Skip repeated take detection.")
+@click.option("--no-captions", is_flag=True,
+              help="Skip caption file generation.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -55,6 +58,7 @@ def ingest(
     no_transcribe: bool,
     no_fillers: bool,
     no_takes: bool,
+    no_captions: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -65,7 +69,8 @@ def ingest(
     do_transcribe = not no_transcribe
     do_fillers = do_transcribe and not no_fillers
     do_takes = do_transcribe and not no_takes
-    n_steps = 5 + int(do_transcribe) + int(do_fillers) + int(do_takes)
+    do_captions = do_transcribe and not no_captions
+    n_steps = 5 + int(do_transcribe) + int(do_fillers) + int(do_takes) + int(do_captions)
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
 
     # ── 1. Ingest ────────────────────────────────────────────────────────────
@@ -184,8 +189,8 @@ def ingest(
     click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
 
     # ── Render ────────────────────────────────────────────────────────────────
-    step = n_steps - 1
-    click.echo(f"\n[{step}/{n_steps}] Rendering rough_cut.mp4...")
+    _s += 1
+    click.echo(f"\n[{_s}/{n_steps}] Rendering rough_cut.mp4...")
     try:
         output_mp4 = render(proxies, all_segments, output_dir, cfg.render)
     except RenderError as e:
@@ -193,8 +198,8 @@ def ingest(
     click.echo(f"    → {output_mp4}")
 
     # ── EDL ───────────────────────────────────────────────────────────────────
-    step = n_steps
-    click.echo(f"\n[{step}/{n_steps}] Saving EDL (decision list + transcript)...")
+    _s += 1
+    click.echo(f"\n[{_s}/{n_steps}] Saving EDL (decision list + transcript)...")
     edl = EDL(
         clips=proxies,
         segments=all_segments,
@@ -203,6 +208,19 @@ def ingest(
     edl_path = output_dir / "edl.json"
     save_edl(edl, edl_path)
     click.echo(f"    → {edl_path}")
+
+    # ── Captions (optional) ───────────────────────────────────────────────────
+    if do_captions:
+        _s += 1
+        fmts = ", ".join(cfg.captions.formats)
+        click.echo(f"\n[{_s}/{n_steps}] Writing captions ({fmts})...")
+        for proxy in proxies:
+            transcript = all_transcripts.get(proxy.clip_id)
+            if transcript is None or not transcript.words:
+                continue
+            written = write_captions(transcript, cfg.captions, output_dir, proxy.clip_id)
+            for fmt, path in written.items():
+                click.echo(f"    {proxy.clip_id} [{fmt}] → {path}")
 
     elapsed = time.perf_counter() - t0
     click.echo(f"\nDone in {elapsed:.1f}s")
