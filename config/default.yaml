@@ -21,3 +21,18 @@ transcribe:
   language: el
   compute_type: int8
   beam_size: 5
+
+fillers:
+  min_isolation_ms: 200
+  padding_ms: 50
+  words:
+    - εε
+    - εεε
+    - εμ
+    - εμμ
+    - αα
+    - ααα
+    - μμ
+    - μμμ
+    - λοιπόν
+    - δηλαδή

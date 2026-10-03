@@ -35,12 +35,22 @@ class TranscribeConfig(BaseModel):
     beam_size: int = 5
 
 
+class FillerConfig(BaseModel):
+    words: list[str] = Field(default_factory=lambda: [
+        "εε", "εεε", "εμ", "εμμ", "αα", "ααα", "μμ", "μμμ",
+        "λοιπόν", "δηλαδή",
+    ])
+    min_isolation_ms: int = 200   # minimum silence gap on each side (ms)
+    padding_ms: int = 50          # extra context cut on each side (ms)
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
     silence: SilenceConfig = Field(default_factory=SilenceConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
+    fillers: FillerConfig = Field(default_factory=FillerConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"
