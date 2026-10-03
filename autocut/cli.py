@@ -12,6 +12,7 @@ from autocut.ingest import IngestError, ingest_clips
 from autocut.models import Segment, SpeechRegion, Transcript
 from autocut.render import RenderError, render
 from autocut.silence import apply_silence_removal
+from autocut.takes import detect_repeated_takes
 from autocut.transcribe import load_whisper_model, transcribe_clip
 from autocut.vad import detect_speech, load_vad_model
 
@@ -43,7 +44,9 @@ def cli(ctx: click.Context, config: Path | None) -> None:
 @click.option("--no-transcribe", is_flag=True,
               help="Skip Whisper transcription (cuts use VAD boundaries only).")
 @click.option("--no-fillers", is_flag=True,
-              help="Skip filler-word detection (implies --no-transcribe is off).")
+              help="Skip filler-word detection.")
+@click.option("--no-takes", is_flag=True,
+              help="Skip repeated take detection.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -51,6 +54,7 @@ def ingest(
     output_dir: Path,
     no_transcribe: bool,
     no_fillers: bool,
+    no_takes: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -60,7 +64,8 @@ def ingest(
     t0 = time.perf_counter()
     do_transcribe = not no_transcribe
     do_fillers = do_transcribe and not no_fillers
-    n_steps = 5 + int(do_transcribe) + int(do_fillers)
+    do_takes = do_transcribe and not no_takes
+    n_steps = 5 + int(do_transcribe) + int(do_fillers) + int(do_takes)
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
 
     # ── 1. Ingest ────────────────────────────────────────────────────────────
@@ -98,10 +103,13 @@ def ingest(
             f"({_fmt(speech_s)} speech / {_fmt(silence_s)} silence)"
         )
 
+    _s = 2  # running step counter (ingest=1, VAD=2 already printed)
+
     # ── 3. Transcribe (optional) ─────────────────────────────────────────────
     all_transcripts: dict[str, Transcript] = {}
     if do_transcribe:
-        click.echo(f"\n[3/{n_steps}] Transcribing speech (faster-whisper {cfg.transcribe.model_size})...")
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Transcribing speech (faster-whisper {cfg.transcribe.model_size})...")
         whisper = load_whisper_model(cfg.transcribe)
         for proxy in proxies:
             if proxy.audio_path is None:
@@ -122,8 +130,8 @@ def ingest(
     # ── 4. Filler detection (optional) ───────────────────────────────────────
     all_filler_cuts: dict[str, list[Segment]] = {p.clip_id: [] for p in proxies}
     if do_fillers:
-        step = 4
-        click.echo(f"\n[{step}/{n_steps}] Detecting filler words...")
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Detecting filler words...")
         for proxy in proxies:
             transcript = all_transcripts.get(proxy.clip_id)
             if transcript is None:
@@ -132,9 +140,22 @@ def ingest(
             all_filler_cuts[proxy.clip_id] = cuts
             click.echo(f"    {proxy.clip_id}: {len(cuts)} filler(s)")
 
-    # ── 5. Silence removal ───────────────────────────────────────────────────
-    step = 2 + int(do_transcribe) + int(do_fillers) + 1
-    click.echo(f"\n[{step}/{n_steps}] Applying silence removal...")
+    # ── 5. Repeated take detection (optional) ────────────────────────────────
+    all_take_cuts: dict[str, list[Segment]] = {p.clip_id: [] for p in proxies}
+    if do_takes:
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Detecting repeated takes...")
+        for proxy in proxies:
+            transcript = all_transcripts.get(proxy.clip_id)
+            if transcript is None:
+                continue
+            cuts = detect_repeated_takes(transcript, cfg.takes)
+            all_take_cuts[proxy.clip_id] = cuts
+            click.echo(f"    {proxy.clip_id}: {len(cuts)} repeated take(s)")
+
+    # ── 6. Silence removal ───────────────────────────────────────────────────
+    _s += 1
+    click.echo(f"\n[{_s}/{n_steps}] Applying silence removal...")
     all_segments: list[Segment] = []
     for proxy in proxies:
         word_ts = (
@@ -148,7 +169,8 @@ def ingest(
             cfg.silence,
             word_timestamps=word_ts or None,
         )
-        segs = punch_out_fillers(segs, all_filler_cuts[proxy.clip_id])
+        extra_cuts = all_filler_cuts[proxy.clip_id] + all_take_cuts[proxy.clip_id]
+        segs = punch_out_fillers(segs, extra_cuts)
         all_segments.extend(segs)
         n_cut = sum(1 for s in segs if s.decision == "cut")
         removed = sum(s.duration for s in segs if s.decision == "cut")

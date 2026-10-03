@@ -44,6 +44,12 @@ class FillerConfig(BaseModel):
     padding_ms: int = 50          # extra context cut on each side (ms)
 
 
+class TakesConfig(BaseModel):
+    similarity_threshold: float = 0.85  # rapidfuzz ratio [0, 1]
+    min_gap_s: float = 0.5              # pause that separates two takes (seconds)
+    min_words: int = 3                  # minimum words per take to qualify
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
@@ -51,6 +57,7 @@ class AutoCutConfig(BaseModel):
     render: RenderConfig = Field(default_factory=RenderConfig)
     transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
     fillers: FillerConfig = Field(default_factory=FillerConfig)
+    takes: TakesConfig = Field(default_factory=TakesConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"
