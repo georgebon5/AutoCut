@@ -50,10 +50,15 @@ def _fake_transcribe(audio_path, speech_regions, clip_id, cfg, model=None):
     return Transcript(clip_id=clip_id, language="el", words=[])
 
 
+def _fake_enrich(segments, audio_path, transcript=None, sr=16000):
+    pass  # no-op: avoids running librosa/parselmouth in CLI integration tests
+
+
 def _patch_pipeline(monkeypatch):
     monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
     monkeypatch.setattr("autocut.cli.load_whisper_model", _fake_load_whisper)
     monkeypatch.setattr("autocut.cli.transcribe_clip", _fake_transcribe)
+    monkeypatch.setattr("autocut.cli.enrich_segments", _fake_enrich)
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +197,7 @@ def test_ingest_no_av_drift(tmp_path, monkeypatch):
 def test_ingest_no_transcribe_flag(tmp_path, monkeypatch):
     """--no-transcribe must skip Whisper and still produce output."""
     monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
+    monkeypatch.setattr("autocut.cli.enrich_segments", _fake_enrich)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     result = runner.invoke(

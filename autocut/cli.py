@@ -7,6 +7,7 @@ import click
 
 from autocut.captions import write_captions
 from autocut.config import load_config
+from autocut.features import enrich_segments
 from autocut.edl import EDL, save_edl
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.ingest import IngestError, ingest_clips
@@ -50,6 +51,8 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="Skip repeated take detection.")
 @click.option("--no-captions", is_flag=True,
               help="Skip caption file generation.")
+@click.option("--no-features", is_flag=True,
+              help="Skip audio feature extraction.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -59,6 +62,7 @@ def ingest(
     no_fillers: bool,
     no_takes: bool,
     no_captions: bool,
+    no_features: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -70,7 +74,9 @@ def ingest(
     do_fillers = do_transcribe and not no_fillers
     do_takes = do_transcribe and not no_takes
     do_captions = do_transcribe and not no_captions
-    n_steps = 5 + int(do_transcribe) + int(do_fillers) + int(do_takes) + int(do_captions)
+    do_features = not no_features
+    n_steps = (5 + int(do_transcribe) + int(do_fillers)
+               + int(do_takes) + int(do_captions) + int(do_features))
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
 
     # ── 1. Ingest ────────────────────────────────────────────────────────────
@@ -187,6 +193,17 @@ def ingest(
     dur_total = sum(p.duration for p in proxies)
     pct = 100 * dur_kept / dur_total if dur_total else 0
     click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
+
+    # ── Audio feature extraction (optional) ──────────────────────────────────
+    if do_features:
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Extracting audio features...")
+        for proxy in proxies:
+            segs = [s for s in all_segments if s.clip_id == proxy.clip_id]
+            transcript = all_transcripts.get(proxy.clip_id)
+            enrich_segments(segs, proxy.audio_path, transcript)
+            n_enriched = sum(1 for s in segs if s.features)
+            click.echo(f"    {proxy.clip_id}: {n_enriched} segment(s) enriched")
 
     # ── Render ────────────────────────────────────────────────────────────────
     _s += 1
