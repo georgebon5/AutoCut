@@ -8,6 +8,7 @@ import click
 from autocut.captions import write_captions
 from autocut.config import load_config
 from autocut.features import enrich_segments
+from autocut.motion import enrich_segments_motion
 from autocut.edl import EDL, save_edl
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.ingest import IngestError, ingest_clips
@@ -194,14 +195,15 @@ def ingest(
     pct = 100 * dur_kept / dur_total if dur_total else 0
     click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
 
-    # ── Audio feature extraction (optional) ──────────────────────────────────
+    # ── Audio + motion feature extraction (optional) ─────────────────────────
     if do_features:
         _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Extracting audio features...")
+        click.echo(f"\n[{_s}/{n_steps}] Extracting audio + motion features...")
         for proxy in proxies:
             segs = [s for s in all_segments if s.clip_id == proxy.clip_id]
             transcript = all_transcripts.get(proxy.clip_id)
             enrich_segments(segs, proxy.audio_path, transcript)
+            enrich_segments_motion(segs, proxy.proxy_path)
             n_enriched = sum(1 for s in segs if s.features)
             click.echo(f"    {proxy.clip_id}: {n_enriched} segment(s) enriched")
 
