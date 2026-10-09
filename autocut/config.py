@@ -116,6 +116,22 @@ class ScoringConfig(BaseModel):
     })
 
 
+class PacingConfig(BaseModel):
+    """Opening-pacing bias: favour short/punchy segments at the start of each clip.
+
+    When enabled, the selection ranker multiplies the interest score of
+    opening segments by ``(ideal_duration / segment_duration) ** bias``:
+    shorter segments get a bonus, longer ones a penalty. Net effect is a
+    denser, faster-paced opening — "more aggressive cutting" per the spec.
+    """
+    enabled: bool = False
+    opening_window_s: float = 7.0           # a segment counts as "opening"
+                                             # if it starts within this of its
+                                             # clip's start
+    opening_ideal_duration_s: float = 2.0   # per-cut ideal length in opening
+    opening_bias: float = 0.5               # 0 = off, 1 = strong
+
+
 class HookConfig(BaseModel):
     """Opening-hook suggestion: top-scoring 1-3s moment prepended to the cut."""
     min_duration_s: float = 1.0   # candidate segments must be at least this long
@@ -148,6 +164,7 @@ class AutoCutConfig(BaseModel):
     keywords: KeywordsConfig = Field(default_factory=KeywordsConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     hook: HookConfig = Field(default_factory=HookConfig)
+    pacing: PacingConfig = Field(default_factory=PacingConfig)
     presets: PresetConfig = Field(default_factory=PresetConfig)
 
 

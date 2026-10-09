@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from autocut.config import PresetConfig
+from autocut.config import PacingConfig, PresetConfig
 from autocut.models import Segment
-from autocut.select import select_segments
+from autocut.select import _effective_score, _in_opening, select_segments
 
 
 # ---------------------------------------------------------------------------
@@ -232,3 +232,111 @@ def test_default_presets_produce_distinct_cut_lengths():
     assert dur_tight <= 45 * 1.10
     assert dur_medium <= 90 * 1.10
     assert dur_loose <= 180 * 1.10
+
+
+# ---------------------------------------------------------------------------
+# Pacing bias
+# ---------------------------------------------------------------------------
+
+def _pacing(**overrides) -> PacingConfig:
+    base = dict(enabled=True, opening_window_s=7.0,
+                opening_ideal_duration_s=2.0, opening_bias=0.5)
+    base.update(overrides)
+    return PacingConfig(**base)
+
+
+def test_in_opening_true_when_start_within_window():
+    assert _in_opening(make_seg(0, 2, score=0.5), _pacing()) is True
+
+
+def test_in_opening_false_when_start_beyond_window():
+    assert _in_opening(make_seg(10, 12, score=0.5), _pacing()) is False
+
+
+def test_in_opening_false_when_pacing_none():
+    assert _in_opening(make_seg(0, 2, score=0.5), None) is False
+
+
+def test_in_opening_false_when_pacing_disabled():
+    assert _in_opening(make_seg(0, 2, score=0.5), _pacing(enabled=False)) is False
+
+
+def test_effective_score_no_pacing_returns_raw():
+    s = make_seg(0, 2, score=0.6)
+    assert _effective_score(s, None) == pytest.approx(0.6)
+
+
+def test_effective_score_opening_segment_at_ideal_duration_unchanged():
+    # duration == ideal → factor = 1
+    s = make_seg(0, 2, score=0.6)   # 2s, ideal 2s
+    assert _effective_score(s, _pacing()) == pytest.approx(0.6)
+
+
+def test_effective_score_short_opening_segment_boosted():
+    # duration 1s < ideal 2s → factor > 1
+    s = make_seg(0, 1, score=0.5)
+    assert _effective_score(s, _pacing()) > 0.5
+
+
+def test_effective_score_long_opening_segment_penalised():
+    # duration 4s > ideal 2s → factor < 1
+    s = make_seg(0, 4, score=0.5)
+    assert _effective_score(s, _pacing()) < 0.5
+
+
+def test_effective_score_outside_window_unchanged_even_if_short():
+    # start=10s is past window (7s) → raw score regardless of duration.
+    s = make_seg(10, 10.5, score=0.5)
+    assert _effective_score(s, _pacing()) == pytest.approx(0.5)
+
+
+def test_pacing_disabled_matches_baseline_selection():
+    """A disabled pacing should not change selection outcome vs no pacing."""
+    segs = [
+        make_seg(0, 5, score=0.7),
+        make_seg(5, 10, score=0.5),
+        make_seg(10, 15, score=0.9),
+    ]
+    cfg = default_cfg(targets={"t": 10.0}, tolerance=0.0)
+    base = {s.start for s in select_segments(segs, "t", cfg) if s.decision == "keep"}
+    with_off = {
+        s.start for s in select_segments(segs, "t", cfg, pacing=_pacing(enabled=False))
+        if s.decision == "keep"
+    }
+    assert base == with_off
+
+
+def test_pacing_prefers_short_opener_over_long_higher_score_opener():
+    """A long opener with slightly higher base score should lose to a short one
+    once pacing is applied with a strong bias."""
+    segs = [
+        make_seg(0, 6, score=0.80),      # long opener, slightly higher score
+        make_seg(0, 1, score=0.70, clip_id="c2"),  # short opener, lower score
+    ]
+    cfg = default_cfg(targets={"t": 1.5}, tolerance=0.0)
+    # Baseline (no pacing): the longer 0.8 wins.
+    out_base = select_segments(segs, "t", cfg)
+    kept_base = {(s.clip_id, s.start) for s in out_base if s.decision == "keep"}
+    assert ("c", 0.0) in kept_base
+
+    # With pacing + strong bias: short opener should be preferred.
+    out_paced = select_segments(segs, "t", cfg,
+                                pacing=_pacing(opening_bias=1.0,
+                                               opening_ideal_duration_s=1.0))
+    kept_paced = {(s.clip_id, s.start) for s in out_paced if s.decision == "keep"}
+    assert ("c2", 0.0) in kept_paced
+
+
+def test_pacing_reason_tag_appears_on_opening_segment():
+    segs = [make_seg(0, 2, score=0.9), make_seg(10, 12, score=0.8)]
+    cfg = default_cfg(targets={"t": 2.0}, tolerance=0.0)
+    out = select_segments(segs, "t", cfg, pacing=_pacing())
+    opener = next(s for s in out if s.start == 0.0)
+    assert any("pacing" in r for r in opener.reasons)
+
+
+def test_pacing_no_tag_outside_opening_window():
+    segs = [make_seg(10, 12, score=0.9)]   # starts past window
+    cfg = default_cfg(targets={"t": 10.0}, tolerance=0.0)
+    out = select_segments(segs, "t", cfg, pacing=_pacing())
+    assert not any("pacing" in r for r in out[0].reasons)

@@ -103,6 +103,12 @@ hook:
   min_duration_s: 1.0       # candidate segment must be at least this long
   max_duration_s: 3.0       # longer candidates centre-sliced to this length
 
+pacing:
+  enabled: false            # opt-in: more aggressive cutting in each clip's opening
+  opening_window_s: 7.0     # segments starting within this of the clip start count as opening
+  opening_ideal_duration_s: 2.0   # per-cut ideal length in the opening
+  opening_bias: 0.5         # 0 = no effect, 1 = strong short-bonus / long-penalty
+
 presets:
   targets:
     tight: 45.0       # seconds — fast TikTok hook cut

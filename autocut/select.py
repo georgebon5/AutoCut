@@ -4,14 +4,39 @@ from __future__ import annotations
 
 import copy
 
-from autocut.config import PresetConfig
+from autocut.config import PacingConfig, PresetConfig
 from autocut.models import Segment
+
+
+def _in_opening(seg: Segment, pacing: PacingConfig | None) -> bool:
+    """True iff ``seg`` starts within the pacing opening window of its clip."""
+    return (
+        pacing is not None
+        and pacing.enabled
+        and seg.start < pacing.opening_window_s
+    )
+
+
+def _effective_score(seg: Segment, pacing: PacingConfig | None) -> float:
+    """Score used for ranking — boosted/penalised by pacing when applicable.
+
+    Opening segments shorter than ``opening_ideal_duration_s`` get a bonus;
+    longer ones get a penalty. ``opening_bias`` controls the strength.
+    """
+    base = seg.interest_score
+    if not _in_opening(seg, pacing):
+        return base
+    assert pacing is not None   # narrowed by _in_opening
+    duration = max(seg.duration, 1e-3)
+    factor = (pacing.opening_ideal_duration_s / duration) ** pacing.opening_bias
+    return base * factor
 
 
 def select_segments(
     segments: list[Segment],
     preset_name: str,
     cfg: PresetConfig,
+    pacing: PacingConfig | None = None,
 ) -> list[Segment]:
     """Return a copy of `segments` with decisions updated for the given preset.
 
@@ -40,12 +65,16 @@ def select_segments(
     # Target already covers everything available → keep all candidates.
     if total_keep <= target:
         for s in candidates:
+            tag = ", pacing" if _in_opening(s, pacing) else ""
             s.reasons.append(
-                f"selected (score={s.interest_score:.2f}, preset={preset_name})"
+                f"selected (score={s.interest_score:.2f}, preset={preset_name}{tag})"
             )
         return out
 
-    ranked = sorted(candidates, key=lambda s: (-s.interest_score, s.duration))
+    ranked = sorted(
+        candidates,
+        key=lambda s: (-_effective_score(s, pacing), s.duration),
+    )
     upper = target * (1.0 + cfg.tolerance)
 
     cumulative = 0.0
@@ -62,14 +91,15 @@ def select_segments(
         cumulative = projected
 
     for s in candidates:
+        tag = ", pacing" if _in_opening(s, pacing) else ""
         if id(s) in keep_ids:
             s.reasons.append(
-                f"selected (score={s.interest_score:.2f}, preset={preset_name})"
+                f"selected (score={s.interest_score:.2f}, preset={preset_name}{tag})"
             )
         else:
             s.decision = "cut"
             s.reasons.append(
-                f"dropped (score={s.interest_score:.2f}, preset={preset_name})"
+                f"dropped (score={s.interest_score:.2f}, preset={preset_name}{tag})"
             )
 
     return out

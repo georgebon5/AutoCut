@@ -65,6 +65,8 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="Target-duration selection preset. 'all' renders tight+medium+loose.")
 @click.option("--hook", "hook_opt", is_flag=True,
               help="Prepend the top-scoring 1-3s moment as an opening teaser.")
+@click.option("--pacing", "pacing_opt", is_flag=True,
+              help="More aggressive cutting in each clip's opening window.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -77,6 +79,7 @@ def ingest(
     no_features: bool,
     preset: str,
     hook_opt: bool,
+    pacing_opt: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -98,6 +101,13 @@ def ingest(
         raise click.ClickException(
             "--hook requires feature extraction; remove --no-features."
         )
+    if pacing_opt:
+        if preset == "none":
+            raise click.ClickException(
+                "--pacing only affects --preset selection; combine with "
+                "--preset tight|medium|loose|all."
+            )
+        cfg.pacing.enabled = True
     if preset == "all":
         presets_to_render = list(cfg.presets.targets.keys())
     elif preset == "none":
@@ -297,7 +307,7 @@ def ingest(
     else:
         n_steps += 2 * len(presets_to_render)
         for p in presets_to_render:
-            segs = select_segments(all_segments, p, cfg.presets)
+            segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
             kept_dur = sum(s.duration for s in segs if s.decision == "keep")
             target = cfg.presets.targets[p]
             click.echo(
