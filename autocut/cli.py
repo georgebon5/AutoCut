@@ -10,6 +10,7 @@ from autocut.config import load_config
 from autocut.features import enrich_segments
 from autocut.motion import enrich_segments_motion
 from autocut.scoring import score_segments
+from autocut.select import select_segments
 from autocut.edl import EDL, save_edl
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.ingest import IngestError, ingest_clips
@@ -55,6 +56,10 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="Skip caption file generation.")
 @click.option("--no-features", is_flag=True,
               help="Skip audio feature extraction.")
+@click.option("--preset",
+              type=click.Choice(["none", "tight", "medium", "loose", "all"]),
+              default="none", show_default=True,
+              help="Target-duration selection preset. 'all' renders tight+medium+loose.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -65,6 +70,7 @@ def ingest(
     no_takes: bool,
     no_captions: bool,
     no_features: bool,
+    preset: str,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -77,7 +83,21 @@ def ingest(
     do_takes = do_transcribe and not no_takes
     do_captions = do_transcribe and not no_captions
     do_features = not no_features
-    n_steps = (5 + int(do_transcribe) + int(do_fillers)
+
+    if preset != "none" and not do_features:
+        raise click.ClickException(
+            "--preset requires feature extraction; remove --no-features."
+        )
+    if preset == "all":
+        presets_to_render = list(cfg.presets.targets.keys())
+    elif preset == "none":
+        presets_to_render = []
+    else:
+        presets_to_render = [preset]
+
+    # Base: ingest, VAD, silence (3). Render + EDL are counted later per
+    # preset (1 preset = 2 steps, "all" = 6, no preset = 2).
+    n_steps = (3 + int(do_transcribe) + int(do_fillers)
                + int(do_takes) + int(do_captions) + int(do_features))
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
 
@@ -216,26 +236,49 @@ def ingest(
                 f"  avg score {avg_score:.2f}"
             )
 
-    # ── Render ────────────────────────────────────────────────────────────────
-    _s += 1
-    click.echo(f"\n[{_s}/{n_steps}] Rendering rough_cut.mp4...")
-    try:
-        output_mp4 = render(proxies, all_segments, output_dir, cfg.render)
-    except RenderError as e:
-        raise click.ClickException(str(e)) from e
-    click.echo(f"    → {output_mp4}")
+    # ── Render + EDL ─────────────────────────────────────────────────────────
+    # Without a preset, we emit the full silence-removed cut (rough_cut.mp4 +
+    # edl.json). With preset(s), each pass runs select_segments on a copy of
+    # all_segments and writes rough_cut_<preset>.mp4 + edl_<preset>.json so the
+    # upstream decision list stays untouched between passes.
+    def _render_pass(segs: list[Segment], video_name: str, edl_name: str) -> None:
+        nonlocal _s
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Rendering {video_name}...")
+        try:
+            out_mp4 = render(proxies, segs, output_dir, cfg.render,
+                             output_name=video_name)
+        except RenderError as e:
+            raise click.ClickException(str(e)) from e
+        click.echo(f"    → {out_mp4}")
 
-    # ── EDL ───────────────────────────────────────────────────────────────────
-    _s += 1
-    click.echo(f"\n[{_s}/{n_steps}] Saving EDL (decision list + transcript)...")
-    edl = EDL(
-        clips=proxies,
-        segments=all_segments,
-        transcripts=list(all_transcripts.values()),
-    )
-    edl_path = output_dir / "edl.json"
-    save_edl(edl, edl_path)
-    click.echo(f"    → {edl_path}")
+        _s += 1
+        click.echo(f"\n[{_s}/{n_steps}] Saving {edl_name}...")
+        edl = EDL(
+            clips=proxies,
+            segments=segs,
+            transcripts=list(all_transcripts.values()),
+        )
+        edl_path = output_dir / edl_name
+        save_edl(edl, edl_path)
+        click.echo(f"    → {edl_path}")
+
+    if not presets_to_render:
+        n_steps += 2
+        _render_pass(all_segments, "rough_cut.mp4", "edl.json")
+    else:
+        n_steps += 2 * len(presets_to_render)
+        for p in presets_to_render:
+            segs = select_segments(all_segments, p, cfg.presets)
+            kept_dur = sum(s.duration for s in segs if s.decision == "keep")
+            target = cfg.presets.targets[p]
+            click.echo(
+                f"\n  preset={p}: target {target:.0f}s, "
+                f"selected {kept_dur:.0f}s "
+                f"({sum(1 for s in segs if s.decision == 'keep')} keep / "
+                f"{sum(1 for s in segs if s.decision == 'cut')} cut)"
+            )
+            _render_pass(segs, f"rough_cut_{p}.mp4", f"edl_{p}.json")
 
     # ── Captions (optional) ───────────────────────────────────────────────────
     if do_captions:

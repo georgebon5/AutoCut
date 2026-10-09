@@ -77,6 +77,19 @@ class ScoringConfig(BaseModel):
     })
 
 
+class PresetConfig(BaseModel):
+    """Target-duration presets for score-driven segment selection."""
+    targets: dict[str, float] = Field(default_factory=lambda: {
+        "tight": 45.0,
+        "medium": 90.0,
+        "loose": 180.0,
+    })
+    # Fraction above target allowed when the next-best segment would overshoot
+    # (e.g. tolerance=0.10 → medium preset can go up to 99s instead of 90s
+    # if dropping that segment would leave us well below target).
+    tolerance: float = 0.10
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
@@ -87,6 +100,7 @@ class AutoCutConfig(BaseModel):
     takes: TakesConfig = Field(default_factory=TakesConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    presets: PresetConfig = Field(default_factory=PresetConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"

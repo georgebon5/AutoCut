@@ -121,23 +121,25 @@ def render(
     segments: list[Segment],
     output_dir: Path,
     cfg: RenderConfig,
+    output_name: str = "rough_cut.mp4",
 ) -> Path:
-    """Concatenate kept segments across all proxy clips into rough_cut.mp4.
+    """Concatenate kept segments across all proxy clips into a single video.
 
     Args:
         proxies: ProxyInfo list sorted by creation_time (from ingest).
         segments: All Segment objects from apply_silence_removal.
-        output_dir: Directory where rough_cut.mp4 will be written.
+        output_dir: Directory where the output will be written.
         cfg: Render settings.
+        output_name: Filename for the rendered video (default rough_cut.mp4).
 
     Returns:
-        Path to the rendered rough_cut.mp4.
+        Path to the rendered video.
 
     Raises:
         RenderError: If no kept segments exist or ffmpeg fails.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "rough_cut.mp4"
+    output_path = output_dir / output_name
 
     proxy_by_id = {p.clip_id: p for p in proxies}
     clip_order = {p.clip_id: i for i, p in enumerate(proxies)}

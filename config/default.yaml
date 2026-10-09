@@ -62,3 +62,10 @@ scoring:
     voiced_fraction: 1.0
     speaking_rate: 6.0
     motion_mean: 0.20
+
+presets:
+  targets:
+    tight: 45.0       # seconds — fast TikTok hook cut
+    medium: 90.0      # seconds — standard "day with me" length
+    loose: 180.0      # seconds — long-form vlog
+  tolerance: 0.10     # allow up to +10% over target to avoid dropping edge segments
