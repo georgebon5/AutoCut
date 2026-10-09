@@ -58,14 +58,38 @@ class CaptionConfig(BaseModel):
     style: str = "tiktok"        # ASS style preset ("tiktok" or "default")
 
 
+class KeywordsConfig(BaseModel):
+    """Transcript keyword boosts for interest scoring."""
+    # Greek emotional/reaction phrases typical in "day with me" vlogs.
+    exclamations: list[str] = Field(default_factory=lambda: [
+        "θεέ μου", "θεε μου",
+        "δεν το πιστεύω", "δεν το πιστευω",
+        "ωραία", "ωραια",
+        "τέλεια", "τελεια",
+        "απίστευτο", "απιστευτο",
+        "ωπα", "ώπα",
+        "ουάου", "ουαου", "wow",
+        "αμάν", "αμαν",
+        "χαχα", "χαχαχα",
+    ])
+    # Prices: digits optionally followed by €/ευρώ (and variants). Case-insensitive.
+    price_pattern: str = r"\d+(?:[.,]\d+)?\s*(?:€|ευρώ|ευρω|euro)"
+    enable_proper_names: bool = True
+    # Weights for combining category counts into the keyword_hits feature.
+    exclamation_weight: float = 1.0
+    price_weight: float = 1.0
+    proper_name_weight: float = 0.5
+
+
 class ScoringConfig(BaseModel):
     # Per-feature contribution weights (need not sum to 1 — normalised internally).
     weights: dict[str, float] = Field(default_factory=lambda: {
-        "rms_energy": 0.25,
-        "pitch_std": 0.20,
-        "voiced_fraction": 0.15,
-        "speaking_rate": 0.20,
-        "motion_mean": 0.20,
+        "rms_energy": 0.22,
+        "pitch_std": 0.18,
+        "voiced_fraction": 0.13,
+        "speaking_rate": 0.17,
+        "motion_mean": 0.15,
+        "keyword_hits": 0.15,
     })
     # Values at or above feature_max map to 1.0 after normalisation.
     feature_max: dict[str, float] = Field(default_factory=lambda: {
@@ -74,6 +98,7 @@ class ScoringConfig(BaseModel):
         "voiced_fraction": 1.0,
         "speaking_rate": 6.0,
         "motion_mean": 0.20,
+        "keyword_hits": 3.0,
     })
 
 
@@ -99,6 +124,7 @@ class AutoCutConfig(BaseModel):
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
+    keywords: KeywordsConfig = Field(default_factory=KeywordsConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     presets: PresetConfig = Field(default_factory=PresetConfig)
 

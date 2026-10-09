@@ -8,6 +8,7 @@ import click
 from autocut.captions import write_captions
 from autocut.config import load_config
 from autocut.features import enrich_segments
+from autocut.keywords import enrich_segments_keywords
 from autocut.motion import enrich_segments_motion
 from autocut.scoring import score_segments
 from autocut.select import select_segments
@@ -225,6 +226,7 @@ def ingest(
             transcript = all_transcripts.get(proxy.clip_id)
             enrich_segments(segs, proxy.audio_path, transcript)
             enrich_segments_motion(segs, proxy.proxy_path)
+            enrich_segments_keywords(segs, transcript, cfg.keywords)
             score_segments(segs, cfg.scoring)
             n_enriched = sum(1 for s in segs if s.features)
             avg_score = (

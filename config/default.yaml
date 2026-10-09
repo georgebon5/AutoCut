@@ -49,19 +49,48 @@ captions:
   min_gap_s: 0.4
   style: tiktok
 
+keywords:
+  exclamations:
+    - θεέ μου
+    - θεε μου
+    - δεν το πιστεύω
+    - δεν το πιστευω
+    - ωραία
+    - ωραια
+    - τέλεια
+    - τελεια
+    - απίστευτο
+    - απιστευτο
+    - ωπα
+    - ώπα
+    - ουάου
+    - ουαου
+    - wow
+    - αμάν
+    - αμαν
+    - χαχα
+    - χαχαχα
+  price_pattern: '\d+(?:[.,]\d+)?\s*(?:€|ευρώ|ευρω|euro)'
+  enable_proper_names: true
+  exclamation_weight: 1.0
+  price_weight: 1.0
+  proper_name_weight: 0.5
+
 scoring:
   weights:
-    rms_energy: 0.25
-    pitch_std: 0.20
-    voiced_fraction: 0.15
-    speaking_rate: 0.20
-    motion_mean: 0.20
+    rms_energy: 0.22
+    pitch_std: 0.18
+    voiced_fraction: 0.13
+    speaking_rate: 0.17
+    motion_mean: 0.15
+    keyword_hits: 0.15
   feature_max:
     rms_energy: 0.15
     pitch_std: 50.0
     voiced_fraction: 1.0
     speaking_rate: 6.0
     motion_mean: 0.20
+    keyword_hits: 3.0
 
 presets:
   targets:
