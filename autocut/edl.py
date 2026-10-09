@@ -92,10 +92,12 @@ def _transcript_from_dict(d: dict) -> Transcript:
 
 
 def edl_from_dict(data: dict) -> EDL:
+    hook_raw = data.get("hook")
     return EDL(
         clips=[_proxy_from_dict(c) for c in data["clips"]],
         segments=[_segment_from_dict(s) for s in data["segments"]],
         transcripts=[_transcript_from_dict(t) for t in data.get("transcripts", [])],
+        hook=_segment_from_dict(hook_raw) if hook_raw else None,
         created_at=datetime.fromisoformat(data["created_at"]),
         version=data.get("version", "1.0"),
     )

@@ -99,6 +99,10 @@ scoring:
     keyword_hits: 3.0
     scene_boundary_near: 1.0
 
+hook:
+  min_duration_s: 1.0       # candidate segment must be at least this long
+  max_duration_s: 3.0       # longer candidates centre-sliced to this length
+
 presets:
   targets:
     tight: 45.0       # seconds — fast TikTok hook cut

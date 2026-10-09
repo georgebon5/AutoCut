@@ -76,5 +76,6 @@ class EDL:
     clips: list[ProxyInfo]
     segments: list[Segment]
     transcripts: list[Transcript] = field(default_factory=list)
+    hook: Optional[Segment] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0"

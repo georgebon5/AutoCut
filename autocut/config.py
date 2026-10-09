@@ -116,6 +116,12 @@ class ScoringConfig(BaseModel):
     })
 
 
+class HookConfig(BaseModel):
+    """Opening-hook suggestion: top-scoring 1-3s moment prepended to the cut."""
+    min_duration_s: float = 1.0   # candidate segments must be at least this long
+    max_duration_s: float = 3.0   # longer candidates are centre-sliced to this
+
+
 class PresetConfig(BaseModel):
     """Target-duration presets for score-driven segment selection."""
     targets: dict[str, float] = Field(default_factory=lambda: {
@@ -141,6 +147,7 @@ class AutoCutConfig(BaseModel):
     scenes: SceneConfig = Field(default_factory=SceneConfig)
     keywords: KeywordsConfig = Field(default_factory=KeywordsConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    hook: HookConfig = Field(default_factory=HookConfig)
     presets: PresetConfig = Field(default_factory=PresetConfig)
 
 

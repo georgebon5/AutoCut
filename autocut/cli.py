@@ -8,6 +8,7 @@ import click
 from autocut.captions import write_captions
 from autocut.config import load_config
 from autocut.features import enrich_segments
+from autocut.hook import find_hook_segment
 from autocut.keywords import enrich_segments_keywords
 from autocut.motion import enrich_segments_motion
 from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
@@ -62,6 +63,8 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               type=click.Choice(["none", "tight", "medium", "loose", "all"]),
               default="none", show_default=True,
               help="Target-duration selection preset. 'all' renders tight+medium+loose.")
+@click.option("--hook", "hook_opt", is_flag=True,
+              help="Prepend the top-scoring 1-3s moment as an opening teaser.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -73,6 +76,7 @@ def ingest(
     no_captions: bool,
     no_features: bool,
     preset: str,
+    hook_opt: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -89,6 +93,10 @@ def ingest(
     if preset != "none" and not do_features:
         raise click.ClickException(
             "--preset requires feature extraction; remove --no-features."
+        )
+    if hook_opt and not do_features:
+        raise click.ClickException(
+            "--hook requires feature extraction; remove --no-features."
         )
     if preset == "all":
         presets_to_render = list(cfg.presets.targets.keys())
@@ -241,6 +249,20 @@ def ingest(
                 f"  avg score {avg_score:.2f}"
             )
 
+    # ── Hook suggestion (optional) ───────────────────────────────────────────
+    # Picked once from all scored keep segments so the same opening teaser
+    # applies across every preset render.
+    hook_seg = find_hook_segment(all_segments, cfg.hook) if hook_opt else None
+    if hook_opt:
+        if hook_seg is None:
+            click.echo("\n  hook: no eligible segment (nothing meets min duration)")
+        else:
+            click.echo(
+                f"\n  hook: {hook_seg.clip_id} @ "
+                f"{hook_seg.start:.2f}-{hook_seg.end:.2f}s "
+                f"(score {hook_seg.interest_score:.2f})"
+            )
+
     # ── Render + EDL ─────────────────────────────────────────────────────────
     # Without a preset, we emit the full silence-removed cut (rough_cut.mp4 +
     # edl.json). With preset(s), each pass runs select_segments on a copy of
@@ -252,7 +274,7 @@ def ingest(
         click.echo(f"\n[{_s}/{n_steps}] Rendering {video_name}...")
         try:
             out_mp4 = render(proxies, segs, output_dir, cfg.render,
-                             output_name=video_name)
+                             output_name=video_name, hook=hook_seg)
         except RenderError as e:
             raise click.ClickException(str(e)) from e
         click.echo(f"    → {out_mp4}")
@@ -263,6 +285,7 @@ def ingest(
             clips=proxies,
             segments=segs,
             transcripts=list(all_transcripts.values()),
+            hook=hook_seg,
         )
         edl_path = output_dir / edl_name
         save_edl(edl, edl_path)

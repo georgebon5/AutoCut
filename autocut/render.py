@@ -122,6 +122,7 @@ def render(
     output_dir: Path,
     cfg: RenderConfig,
     output_name: str = "rough_cut.mp4",
+    hook: Segment | None = None,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -131,6 +132,8 @@ def render(
         output_dir: Directory where the output will be written.
         cfg: Render settings.
         output_name: Filename for the rendered video (default rough_cut.mp4).
+        hook: Optional opening-hook segment; rendered first, before the
+            chronological sequence.
 
     Returns:
         Path to the rendered video.
@@ -147,27 +150,33 @@ def render(
     kept = [s for s in segments if s.decision == "keep" and s.duration > 1e-3]
     kept.sort(key=lambda s: (clip_order.get(s.clip_id, 0), s.start))
 
-    if not kept:
+    if not kept and hook is None:
         raise RenderError("No kept segments to render.")
 
     cf_s = cfg.audio_crossfade_ms / 1000.0
-    for s in kept:
-        if s.duration < 2 * cf_s and len(kept) > 1:
+    total_segments = len(kept) + (1 if hook is not None else 0)
+    check_segments = list(kept)
+    if hook is not None:
+        check_segments.append(hook)
+    for s in check_segments:
+        if s.duration < 2 * cf_s and total_segments > 1:
             raise RenderError(
                 f"Segment {s.clip_id}@{s.start:.3f}s is shorter than "
                 f"2×crossfade ({2 * cf_s:.3f}s). Reduce audio_crossfade_ms or "
                 f"increase silence.min_silence."
             )
 
-    kept_tuples: list[_SegmentTuple] = [
-        (
+    def _to_tuple(s: Segment) -> _SegmentTuple:
+        return (
             proxy_by_id[s.clip_id].proxy_path,
             proxy_by_id[s.clip_id].audio_path,   # separate WAV, not proxy audio
             s.start,
             s.end,
         )
-        for s in kept
-    ]
+
+    kept_tuples: list[_SegmentTuple] = [_to_tuple(s) for s in kept]
+    if hook is not None:
+        kept_tuples.insert(0, _to_tuple(hook))
 
     cmd = _build_render_cmd(kept_tuples, output_path, cfg)
     _run(cmd)
