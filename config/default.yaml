@@ -109,6 +109,12 @@ pacing:
   opening_ideal_duration_s: 2.0   # per-cut ideal length in the opening
   opening_bias: 0.5         # 0 = no effect, 1 = strong short-bonus / long-penalty
 
+zoom:
+  enabled: false            # opt-in: subtle punch-in zoom on emphasis moments
+  score_threshold: 0.70     # only segments with interest_score ≥ this get zoomed
+  start_zoom: 1.0           # zoom factor at segment start
+  end_zoom: 1.08            # zoom factor at segment end (subtle 8% push-in)
+
 presets:
   targets:
     tight: 45.0       # seconds — fast TikTok hook cut

@@ -6,10 +6,25 @@ from pathlib import Path
 
 import pytest
 
-from autocut.config import RenderConfig
+from autocut.config import RenderConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
-from autocut.render import RenderError, _build_render_cmd, render
+from autocut.render import RenderError, _RenderSegment, _build_render_cmd, render
 from tests.conftest import make_clip, skip_no_ffmpeg
+
+
+def rs(
+    video: Path,
+    audio: Path | None,
+    start: float,
+    end: float,
+    zoom_end: float = 1.0,
+    start_zoom: float = 1.0,
+) -> _RenderSegment:
+    return _RenderSegment(
+        video_path=video, audio_path=audio,
+        start=start, end=end,
+        zoom_end=zoom_end, start_zoom=start_zoom,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +67,11 @@ def ffprobe_duration(path: Path) -> float:
 
 # ---------------------------------------------------------------------------
 # _build_render_cmd — pure unit tests (no ffmpeg)
-# _SegmentTuple = (proxy_path, audio_wav_path, start, end)
 # ---------------------------------------------------------------------------
 
 def test_cmd_starts_with_ffmpeg():
     cmd = _build_render_cmd(
-        [(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
         Path("out.mp4"),
         default_cfg(),
     )
@@ -67,7 +81,7 @@ def test_cmd_starts_with_ffmpeg():
 
 def test_cmd_single_segment_no_concat_filter():
     cmd = _build_render_cmd(
-        [(Path("a.mp4"), Path("a.wav"), 1.0, 3.0)],
+        [rs(Path("a.mp4"), Path("a.wav"), 1.0, 3.0)],
         Path("out.mp4"),
         default_cfg(),
     )
@@ -80,7 +94,7 @@ def test_cmd_single_segment_no_concat_filter():
 
 def test_cmd_single_segment_maps_v0_a0():
     cmd = _build_render_cmd(
-        [(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
         Path("out.mp4"),
         default_cfg(),
     )
@@ -90,21 +104,21 @@ def test_cmd_single_segment_maps_v0_a0():
 
 
 def test_cmd_multi_segment_has_concat_filter():
-    kept = [(Path(f"{i}.mp4"), Path(f"{i}.wav"), float(i), float(i) + 1.0) for i in range(3)]
+    kept = [rs(Path(f"{i}.mp4"), Path(f"{i}.wav"), float(i), float(i) + 1.0) for i in range(3)]
     cmd = _build_render_cmd(kept, Path("out.mp4"), default_cfg())
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "concat=n=3" in fc
 
 
 def test_cmd_multi_segment_has_acrossfade():
-    kept = [(Path(f"{i}.mp4"), Path(f"{i}.wav"), float(i), float(i) + 1.0) for i in range(3)]
+    kept = [rs(Path(f"{i}.mp4"), Path(f"{i}.wav"), float(i), float(i) + 1.0) for i in range(3)]
     cmd = _build_render_cmd(kept, Path("out.mp4"), default_cfg())
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert fc.count("acrossfade") == 2
 
 
 def test_cmd_crossfade_uses_config_duration():
-    kept = [(Path(f"{i}.mp4"), Path(f"{i}.wav"), 0.0, 2.0) for i in range(2)]
+    kept = [rs(Path(f"{i}.mp4"), Path(f"{i}.wav"), 0.0, 2.0) for i in range(2)]
     cmd = _build_render_cmd(kept, Path("out.mp4"), RenderConfig(audio_crossfade_ms=20))
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "d=0.0200" in fc
@@ -112,7 +126,7 @@ def test_cmd_crossfade_uses_config_duration():
 
 def test_cmd_no_audio_path_uses_aevalsrc():
     cmd = _build_render_cmd(
-        [(Path("broll.mp4"), None, 0.0, 2.0)],
+        [rs(Path("broll.mp4"), None, 0.0, 2.0)],
         Path("out.mp4"),
         default_cfg(),
     )
@@ -122,7 +136,7 @@ def test_cmd_no_audio_path_uses_aevalsrc():
 
 def test_cmd_output_path_is_last():
     cmd = _build_render_cmd(
-        [(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
         Path("my_output.mp4"),
         default_cfg(),
     )
@@ -131,7 +145,7 @@ def test_cmd_output_path_is_last():
 
 def test_cmd_uses_libx264_and_aac():
     cmd = _build_render_cmd(
-        [(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
         Path("out.mp4"),
         default_cfg(),
     )
@@ -142,13 +156,102 @@ def test_cmd_uses_libx264_and_aac():
 def test_cmd_video_and_audio_are_separate_inputs():
     """Proxy (video) and WAV (audio) must be listed as separate -i inputs."""
     cmd = _build_render_cmd(
-        [(Path("proxy.mp4"), Path("audio.wav"), 0.0, 2.0)],
+        [rs(Path("proxy.mp4"), Path("audio.wav"), 0.0, 2.0)],
         Path("out.mp4"),
         default_cfg(),
     )
     inputs = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-i"]
     assert "proxy.mp4" in inputs
     assert "audio.wav" in inputs
+
+
+# ---------------------------------------------------------------------------
+# Zoom filter — pure unit tests
+# ---------------------------------------------------------------------------
+
+def test_cmd_no_zoom_does_not_add_crop_or_scale():
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0, zoom_end=1.0)],
+        Path("out.mp4"), default_cfg(),
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "crop=" not in fc
+    assert "scale=" not in fc
+
+
+def test_cmd_zoom_adds_crop_scale_chain():
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0, zoom_end=1.08)],
+        Path("out.mp4"), default_cfg(),
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "crop=w='iw/" in fc
+    assert "scale=w='iw*" in fc
+    assert "eval=frame" in fc
+
+
+def test_cmd_zoom_uses_segment_duration_in_denominator():
+    """The time-varying zoom expression should reference the segment duration."""
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 1.5, 4.5, zoom_end=1.1)],   # duration 3s
+        Path("out.mp4"), default_cfg(),
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "t/3.0000" in fc
+
+
+def test_cmd_only_zoomed_segments_get_zoom_filter():
+    kept = [
+        rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0, zoom_end=1.0),   # no zoom
+        rs(Path("b.mp4"), Path("b.wav"), 0.0, 2.0, zoom_end=1.1),   # zoom
+    ]
+    cmd = _build_render_cmd(kept, Path("out.mp4"), default_cfg())
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert fc.count("crop=w='iw/") == 1
+
+
+# ---------------------------------------------------------------------------
+# render() zoom integration — threshold routing
+# ---------------------------------------------------------------------------
+
+def _patch_run(monkeypatch) -> list[list[str]]:
+    captured: list[list[str]] = []
+    import autocut.render as render_mod
+    monkeypatch.setattr(render_mod, "_run", lambda cmd: captured.append(cmd))
+    return captured
+
+
+def test_render_zoom_skips_segments_below_threshold(tmp_path, monkeypatch):
+    captured = _patch_run(monkeypatch)
+    proxy = make_proxy("c", tmp_path / "c.mp4", tmp_path / "c.wav")
+    s_low = make_keep("c", 0.0, 2.0); s_low.interest_score = 0.3
+    s_hi = make_keep("c", 3.0, 5.0); s_hi.interest_score = 0.9
+    zoom = ZoomConfig(enabled=True, score_threshold=0.7, start_zoom=1.0, end_zoom=1.1)
+    render([proxy], [s_low, s_hi], tmp_path, default_cfg(), zoom=zoom)
+    fc = captured[0][captured[0].index("-filter_complex") + 1]
+    assert fc.count("crop=w='iw/") == 1   # only one segment zoomed
+
+
+def test_render_zoom_disabled_adds_no_zoom(tmp_path, monkeypatch):
+    captured = _patch_run(monkeypatch)
+    proxy = make_proxy("c", tmp_path / "c.mp4", tmp_path / "c.wav")
+    s = make_keep("c", 0.0, 2.0); s.interest_score = 0.95
+    zoom = ZoomConfig(enabled=False, score_threshold=0.5, end_zoom=1.1)
+    render([proxy], [s], tmp_path, default_cfg(), zoom=zoom)
+    fc = captured[0][captured[0].index("-filter_complex") + 1]
+    assert "crop=" not in fc
+
+
+def test_render_hook_never_zoomed_even_at_high_score(tmp_path, monkeypatch):
+    captured = _patch_run(monkeypatch)
+    proxy = make_proxy("c", tmp_path / "c.mp4", tmp_path / "c.wav")
+    body = make_keep("c", 5.0, 8.0); body.interest_score = 0.95
+    hook = make_keep("c", 0.0, 2.0); hook.interest_score = 0.99
+    zoom = ZoomConfig(enabled=True, score_threshold=0.5, end_zoom=1.1)
+    render([proxy], [body], tmp_path, default_cfg(), hook=hook, zoom=zoom)
+    fc = captured[0][captured[0].index("-filter_complex") + 1]
+    # Two segments total; only body (not hook) should be zoomed.
+    assert fc.count("crop=w='iw/") == 1
 
 
 # ---------------------------------------------------------------------------

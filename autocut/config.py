@@ -116,6 +116,16 @@ class ScoringConfig(BaseModel):
     })
 
 
+class ZoomConfig(BaseModel):
+    """Punch-in zoom on emphasis moments (segments with high interest score)."""
+    enabled: bool = False
+    # Only segments with interest_score >= threshold receive the zoom.
+    score_threshold: float = 0.70
+    # Linear zoom from start_zoom → end_zoom across the segment duration.
+    start_zoom: float = 1.0
+    end_zoom: float = 1.08   # subtle 8% push-in
+
+
 class PacingConfig(BaseModel):
     """Opening-pacing bias: favour short/punchy segments at the start of each clip.
 
@@ -165,6 +175,7 @@ class AutoCutConfig(BaseModel):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     hook: HookConfig = Field(default_factory=HookConfig)
     pacing: PacingConfig = Field(default_factory=PacingConfig)
+    zoom: ZoomConfig = Field(default_factory=ZoomConfig)
     presets: PresetConfig = Field(default_factory=PresetConfig)
 
 

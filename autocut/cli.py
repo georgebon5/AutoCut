@@ -67,6 +67,8 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="Prepend the top-scoring 1-3s moment as an opening teaser.")
 @click.option("--pacing", "pacing_opt", is_flag=True,
               help="More aggressive cutting in each clip's opening window.")
+@click.option("--zoom", "zoom_opt", is_flag=True,
+              help="Subtle punch-in zoom on high-score emphasis moments.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -80,6 +82,7 @@ def ingest(
     preset: str,
     hook_opt: bool,
     pacing_opt: bool,
+    zoom_opt: bool,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -108,6 +111,12 @@ def ingest(
                 "--preset tight|medium|loose|all."
             )
         cfg.pacing.enabled = True
+    if zoom_opt:
+        if not do_features:
+            raise click.ClickException(
+                "--zoom requires feature extraction; remove --no-features."
+            )
+        cfg.zoom.enabled = True
     if preset == "all":
         presets_to_render = list(cfg.presets.targets.keys())
     elif preset == "none":
@@ -284,7 +293,8 @@ def ingest(
         click.echo(f"\n[{_s}/{n_steps}] Rendering {video_name}...")
         try:
             out_mp4 = render(proxies, segs, output_dir, cfg.render,
-                             output_name=video_name, hook=hook_seg)
+                             output_name=video_name, hook=hook_seg,
+                             zoom=cfg.zoom)
         except RenderError as e:
             raise click.ClickException(str(e)) from e
         click.echo(f"    → {out_mp4}")

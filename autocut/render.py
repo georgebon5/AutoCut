@@ -3,16 +3,36 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autocut.config import RenderConfig
+from autocut.config import RenderConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
 
-# (proxy_path, audio_wav_path, segment_start, segment_end)
-# Proxies are video-only (created with -an by ingest); audio comes from the
-# separate 16 kHz WAV.  audio_wav_path is None for B-roll clips with no audio.
-_SegmentTuple = tuple[Path, Optional[Path], float, float]
+
+@dataclass
+class _RenderSegment:
+    """One trimmed segment going into the ffmpeg concat.
+
+    ``zoom_end`` of 1.0 means no zoom (plain trim). ``zoom_end`` > 1.0 adds a
+    linear crop+scale push-in from ``start_zoom`` to ``zoom_end`` across the
+    segment's duration.
+    """
+    video_path: Path
+    audio_path: Optional[Path]      # None for B-roll (no audio)
+    start: float
+    end: float
+    zoom_end: float = 1.0
+    start_zoom: float = 1.0
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+    @property
+    def has_zoom(self) -> bool:
+        return self.zoom_end > self.start_zoom + 1e-6
 
 
 class RenderError(Exception):
@@ -27,8 +47,24 @@ def _run(cmd: list[str]) -> None:
         )
 
 
+def _zoom_filter(rs: _RenderSegment) -> str:
+    """Crop+scale filter chain producing a linear push-in zoom.
+
+    Zoom is applied by cropping a progressively-smaller centred window and
+    scaling it back to the original dimensions. Expressions use the segment-
+    local time ``t`` (0 at segment start, ``duration`` at end).
+    """
+    k = rs.zoom_end - rs.start_zoom
+    d = max(rs.duration, 1e-3)
+    z = f"({rs.start_zoom}+{k:.4f}*t/{d:.4f})"
+    return (
+        f"crop=w='iw/{z}':h='ih/{z}':x='(iw-ow)/2':y='(ih-oh)/2',"
+        f"scale=w='iw*{z}':h='ih*{z}':eval=frame"
+    )
+
+
 def _build_render_cmd(
-    kept: list[_SegmentTuple],
+    kept: list[_RenderSegment],
     output_path: Path,
     cfg: RenderConfig,
 ) -> list[str]:
@@ -40,6 +76,7 @@ def _build_render_cmd(
 
     Filter graph:
     - trim/atrim per segment (frame-accurate)
+    - optional crop+scale per segment for punch-in zoom
     - concat for video
     - chained acrossfade for audio (avoids clicks at every cut)
     - B-roll (no audio): silent aevalsrc of matching duration
@@ -47,20 +84,18 @@ def _build_render_cmd(
     N = len(kept)
     cf_s = cfg.audio_crossfade_ms / 1000.0
 
-    # Build the input list and record which ffmpeg index maps to video/audio
-    # for each segment.
     cmd: list[str] = ["ffmpeg", "-y"]
     video_idx: list[int] = []   # ffmpeg input index for video of segment i
     audio_idx: list[Optional[int]] = []  # …for audio (None → use aevalsrc)
 
     fi = 0  # running ffmpeg input index
-    for proxy_path, audio_path, _, _ in kept:
-        cmd += ["-i", str(proxy_path)]
+    for rs in kept:
+        cmd += ["-i", str(rs.video_path)]
         video_idx.append(fi)
         fi += 1
 
-        if audio_path is not None:
-            cmd += ["-i", str(audio_path)]
+        if rs.audio_path is not None:
+            cmd += ["-i", str(rs.audio_path)]
             audio_idx.append(fi)
             fi += 1
         else:
@@ -68,24 +103,27 @@ def _build_render_cmd(
 
     filters: list[str] = []
 
-    for i, (_, _, start, end) in enumerate(kept):
-        dur = end - start
+    for i, rs in enumerate(kept):
         vi = video_idx[i]
         ai = audio_idx[i]
 
-        filters.append(
-            f"[{vi}:v]trim=start={start:.6f}:end={end:.6f},"
-            f"setpts=PTS-STARTPTS[v{i}]"
+        video_chain = (
+            f"[{vi}:v]trim=start={rs.start:.6f}:end={rs.end:.6f},"
+            f"setpts=PTS-STARTPTS"
         )
+        if rs.has_zoom:
+            video_chain += "," + _zoom_filter(rs)
+        filters.append(f"{video_chain}[v{i}]")
+
         if ai is not None:
             filters.append(
-                f"[{ai}:a]atrim=start={start:.6f}:end={end:.6f},"
+                f"[{ai}:a]atrim=start={rs.start:.6f}:end={rs.end:.6f},"
                 f"asetpts=PTS-STARTPTS[a{i}]"
             )
         else:
             filters.append(
                 f"aevalsrc=0:s=16000:c=mono,"
-                f"atrim=duration={dur:.6f}[a{i}]"
+                f"atrim=duration={rs.duration:.6f}[a{i}]"
             )
 
     if N == 1:
@@ -123,6 +161,7 @@ def render(
     cfg: RenderConfig,
     output_name: str = "rough_cut.mp4",
     hook: Segment | None = None,
+    zoom: ZoomConfig | None = None,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -133,7 +172,10 @@ def render(
         cfg: Render settings.
         output_name: Filename for the rendered video (default rough_cut.mp4).
         hook: Optional opening-hook segment; rendered first, before the
-            chronological sequence.
+            chronological sequence. The hook never receives punch-in zoom.
+        zoom: Optional punch-in-zoom config. When enabled, keep segments with
+            ``interest_score ≥ zoom.score_threshold`` get a linear push-in
+            from ``zoom.start_zoom`` to ``zoom.end_zoom`` across the segment.
 
     Returns:
         Path to the rendered video.
@@ -166,18 +208,31 @@ def render(
                 f"increase silence.min_silence."
             )
 
-    def _to_tuple(s: Segment) -> _SegmentTuple:
-        return (
-            proxy_by_id[s.clip_id].proxy_path,
-            proxy_by_id[s.clip_id].audio_path,   # separate WAV, not proxy audio
-            s.start,
-            s.end,
+    def _zoom_for(s: Segment) -> float:
+        if zoom is None or not zoom.enabled:
+            return 1.0
+        if s.interest_score < zoom.score_threshold:
+            return 1.0
+        return zoom.end_zoom
+
+    def _to_render_segment(s: Segment, allow_zoom: bool) -> _RenderSegment:
+        zoom_end = _zoom_for(s) if allow_zoom else 1.0
+        start_zoom = zoom.start_zoom if (zoom is not None and zoom_end > 1.0) else 1.0
+        return _RenderSegment(
+            video_path=proxy_by_id[s.clip_id].proxy_path,
+            audio_path=proxy_by_id[s.clip_id].audio_path,
+            start=s.start,
+            end=s.end,
+            zoom_end=zoom_end,
+            start_zoom=start_zoom,
         )
 
-    kept_tuples: list[_SegmentTuple] = [_to_tuple(s) for s in kept]
+    kept_render: list[_RenderSegment] = [
+        _to_render_segment(s, allow_zoom=True) for s in kept
+    ]
     if hook is not None:
-        kept_tuples.insert(0, _to_tuple(hook))
+        kept_render.insert(0, _to_render_segment(hook, allow_zoom=False))
 
-    cmd = _build_render_cmd(kept_tuples, output_path, cfg)
+    cmd = _build_render_cmd(kept_render, output_path, cfg)
     _run(cmd)
     return output_path
