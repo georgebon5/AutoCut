@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from autocut_api import __version__
 from autocut_api.config import ApiConfig
 from autocut_api.database import Base, make_engine, make_session_factory
-from autocut_api.routes import health
+from autocut_api.routes import health, uploads
 
 
 def create_app(cfg: ApiConfig | None = None) -> FastAPI:
@@ -31,6 +31,7 @@ def create_app(cfg: ApiConfig | None = None) -> FastAPI:
     app.state.session_factory = session_factory
 
     app.include_router(health.router)
+    app.include_router(uploads.router)
     return app
 
 
