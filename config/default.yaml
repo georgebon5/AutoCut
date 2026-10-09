@@ -48,3 +48,17 @@ captions:
   max_duration_s: 3.0
   min_gap_s: 0.4
   style: tiktok
+
+scoring:
+  weights:
+    rms_energy: 0.25
+    pitch_std: 0.20
+    voiced_fraction: 0.15
+    speaking_rate: 0.20
+    motion_mean: 0.20
+  feature_max:
+    rms_energy: 0.15
+    pitch_std: 50.0
+    voiced_fraction: 1.0
+    speaking_rate: 6.0
+    motion_mean: 0.20

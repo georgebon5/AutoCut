@@ -58,6 +58,25 @@ class CaptionConfig(BaseModel):
     style: str = "tiktok"        # ASS style preset ("tiktok" or "default")
 
 
+class ScoringConfig(BaseModel):
+    # Per-feature contribution weights (need not sum to 1 — normalised internally).
+    weights: dict[str, float] = Field(default_factory=lambda: {
+        "rms_energy": 0.25,
+        "pitch_std": 0.20,
+        "voiced_fraction": 0.15,
+        "speaking_rate": 0.20,
+        "motion_mean": 0.20,
+    })
+    # Values at or above feature_max map to 1.0 after normalisation.
+    feature_max: dict[str, float] = Field(default_factory=lambda: {
+        "rms_energy": 0.15,
+        "pitch_std": 50.0,
+        "voiced_fraction": 1.0,
+        "speaking_rate": 6.0,
+        "motion_mean": 0.20,
+    })
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
@@ -67,6 +86,7 @@ class AutoCutConfig(BaseModel):
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
+    scoring: ScoringConfig = Field(default_factory=ScoringConfig)
 
 
 _DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "default.yaml"

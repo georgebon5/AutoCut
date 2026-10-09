@@ -9,6 +9,7 @@ from autocut.captions import write_captions
 from autocut.config import load_config
 from autocut.features import enrich_segments
 from autocut.motion import enrich_segments_motion
+from autocut.scoring import score_segments
 from autocut.edl import EDL, save_edl
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.ingest import IngestError, ingest_clips
@@ -195,17 +196,25 @@ def ingest(
     pct = 100 * dur_kept / dur_total if dur_total else 0
     click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
 
-    # ── Audio + motion feature extraction (optional) ─────────────────────────
+    # ── Audio + motion features + interest scoring (optional) ────────────────
     if do_features:
         _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Extracting audio + motion features...")
+        click.echo(f"\n[{_s}/{n_steps}] Extracting features + scoring interest...")
         for proxy in proxies:
             segs = [s for s in all_segments if s.clip_id == proxy.clip_id]
             transcript = all_transcripts.get(proxy.clip_id)
             enrich_segments(segs, proxy.audio_path, transcript)
             enrich_segments_motion(segs, proxy.proxy_path)
+            score_segments(segs, cfg.scoring)
             n_enriched = sum(1 for s in segs if s.features)
-            click.echo(f"    {proxy.clip_id}: {n_enriched} segment(s) enriched")
+            avg_score = (
+                sum(s.interest_score for s in segs if s.decision == "keep") /
+                max(1, sum(1 for s in segs if s.decision == "keep"))
+            )
+            click.echo(
+                f"    {proxy.clip_id}: {n_enriched} segment(s) enriched"
+                f"  avg score {avg_score:.2f}"
+            )
 
     # ── Render ────────────────────────────────────────────────────────────────
     _s += 1
