@@ -10,6 +10,7 @@ from autocut.config import load_config
 from autocut.features import enrich_segments
 from autocut.keywords import enrich_segments_keywords
 from autocut.motion import enrich_segments_motion
+from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
 from autocut.scoring import score_segments
 from autocut.select import select_segments
 from autocut.edl import EDL, save_edl
@@ -227,6 +228,8 @@ def ingest(
             enrich_segments(segs, proxy.audio_path, transcript)
             enrich_segments_motion(segs, proxy.proxy_path)
             enrich_segments_keywords(segs, transcript, cfg.keywords)
+            boundaries = detect_scene_boundaries(proxy.proxy_path, cfg.scenes)
+            enrich_segments_scenes(segs, {proxy.clip_id: boundaries}, cfg.scenes)
             score_segments(segs, cfg.scoring)
             n_enriched = sum(1 for s in segs if s.features)
             avg_score = (

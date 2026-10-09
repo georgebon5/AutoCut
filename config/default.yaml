@@ -49,6 +49,11 @@ captions:
   min_gap_s: 0.4
   style: tiktok
 
+scenes:
+  threshold: 27.0           # PySceneDetect ContentDetector threshold (higher → fewer cuts)
+  min_scene_len_s: 0.4      # merge scenes shorter than this into the previous
+  boundary_window_s: 0.5    # segment edge within this of a boundary → "near shot change"
+
 keywords:
   exclamations:
     - θεέ μου
@@ -78,12 +83,13 @@ keywords:
 
 scoring:
   weights:
-    rms_energy: 0.22
-    pitch_std: 0.18
-    voiced_fraction: 0.13
-    speaking_rate: 0.17
-    motion_mean: 0.15
-    keyword_hits: 0.15
+    rms_energy: 0.20
+    pitch_std: 0.16
+    voiced_fraction: 0.12
+    speaking_rate: 0.15
+    motion_mean: 0.13
+    keyword_hits: 0.14
+    scene_boundary_near: 0.10
   feature_max:
     rms_energy: 0.15
     pitch_std: 50.0
@@ -91,6 +97,7 @@ scoring:
     speaking_rate: 6.0
     motion_mean: 0.20
     keyword_hits: 3.0
+    scene_boundary_near: 1.0
 
 presets:
   targets:

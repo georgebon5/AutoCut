@@ -58,6 +58,18 @@ class CaptionConfig(BaseModel):
     style: str = "tiktok"        # ASS style preset ("tiktok" or "default")
 
 
+class SceneConfig(BaseModel):
+    """Shot-change detection via PySceneDetect ContentDetector."""
+    # Higher threshold → fewer detected cuts. 27.0 is the PySceneDetect default
+    # and works well for typical phone footage; drop to ~20 for subtle changes.
+    threshold: float = 27.0
+    # Scenes shorter than this get merged into the previous scene.
+    min_scene_len_s: float = 0.4
+    # A segment edge within this distance (seconds) of a scene boundary is
+    # considered "near a shot change" (feature value 1.0).
+    boundary_window_s: float = 0.5
+
+
 class KeywordsConfig(BaseModel):
     """Transcript keyword boosts for interest scoring."""
     # Greek emotional/reaction phrases typical in "day with me" vlogs.
@@ -84,12 +96,13 @@ class KeywordsConfig(BaseModel):
 class ScoringConfig(BaseModel):
     # Per-feature contribution weights (need not sum to 1 — normalised internally).
     weights: dict[str, float] = Field(default_factory=lambda: {
-        "rms_energy": 0.22,
-        "pitch_std": 0.18,
-        "voiced_fraction": 0.13,
-        "speaking_rate": 0.17,
-        "motion_mean": 0.15,
-        "keyword_hits": 0.15,
+        "rms_energy": 0.20,
+        "pitch_std": 0.16,
+        "voiced_fraction": 0.12,
+        "speaking_rate": 0.15,
+        "motion_mean": 0.13,
+        "keyword_hits": 0.14,
+        "scene_boundary_near": 0.10,
     })
     # Values at or above feature_max map to 1.0 after normalisation.
     feature_max: dict[str, float] = Field(default_factory=lambda: {
@@ -99,6 +112,7 @@ class ScoringConfig(BaseModel):
         "speaking_rate": 6.0,
         "motion_mean": 0.20,
         "keyword_hits": 3.0,
+        "scene_boundary_near": 1.0,
     })
 
 
@@ -124,6 +138,7 @@ class AutoCutConfig(BaseModel):
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)
     captions: CaptionConfig = Field(default_factory=CaptionConfig)
+    scenes: SceneConfig = Field(default_factory=SceneConfig)
     keywords: KeywordsConfig = Field(default_factory=KeywordsConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     presets: PresetConfig = Field(default_factory=PresetConfig)
