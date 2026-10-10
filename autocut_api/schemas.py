@@ -71,3 +71,22 @@ class CompleteResponse(BaseModel):
     status: str
     final_path: str
     total_size: int
+
+
+class SegmentUpdate(BaseModel):
+    """PATCH body for toggling a single segment's keep/cut decision."""
+    decision: str   # "keep" or "cut"
+
+
+class SegmentResponse(BaseModel):
+    """Full segment view returned after a successful PATCH."""
+    index: int
+    clip_id: str
+    start: float
+    end: float
+    duration: float
+    decision: str
+    decision_source: str
+    interest_score: float
+    reasons: list[str]
+    features: dict
