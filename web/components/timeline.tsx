@@ -1,9 +1,9 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { ApiError, patchSegment } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
 // 50 px / second → a 10 s clip is 500 px wide. Horizontal scroll handles long
@@ -20,7 +20,6 @@ interface Props {
 }
 
 export default function Timeline({ jobId, preset, edl }: Props) {
-  const qc = useQueryClient();
   const [selected, setSelected] = useState<number | null>(null);
 
   // Group segments by clip for row layout; preserve original EDL index so we
@@ -35,31 +34,7 @@ export default function Timeline({ jobId, preset, edl }: Props) {
     return map;
   }, [edl.segments]);
 
-  const toggleMut = useMutation({
-    mutationFn: ({ index, decision }: { index: number; decision: Decision }) =>
-      patchSegment(jobId, index, { decision }, preset),
-
-    // Optimistic: flip immediately, roll back on failure.
-    onMutate: async ({ index, decision }) => {
-      await qc.cancelQueries({ queryKey: ["edl", jobId, preset ?? null] });
-      const prev = qc.getQueryData<Edl>(["edl", jobId, preset ?? null]);
-      if (prev) {
-        qc.setQueryData<Edl>(["edl", jobId, preset ?? null], {
-          ...prev,
-          segments: prev.segments.map((s, i) =>
-            i === index ? { ...s, decision, decision_source: "user" } : s,
-          ),
-        });
-      }
-      return { prev };
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.prev) {
-        qc.setQueryData(["edl", jobId, preset ?? null], ctx.prev);
-      }
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["edl", jobId, preset ?? null] }),
-  });
+  const toggleMut = useSegmentToggle(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;

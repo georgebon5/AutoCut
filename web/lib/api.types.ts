@@ -92,10 +92,24 @@ export interface Clip {
   creation_time: string | null;
 }
 
+export interface WordTimestamp {
+  word: string;
+  start: number;
+  end: number;
+  probability: number;
+  clip_id: string;
+}
+
+export interface Transcript {
+  clip_id: string;
+  language: string;
+  words: WordTimestamp[];
+}
+
 export interface Edl {
   clips: Clip[];
   segments: SegmentDict[];
-  transcripts: Record<string, unknown>[];
+  transcripts: Transcript[];
   hook: SegmentDict | null;
   created_at: string;
   version: string;

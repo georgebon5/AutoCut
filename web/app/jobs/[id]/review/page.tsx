@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
+import Transcript from "@/components/transcript";
 import { ApiError, getEdl, getJob, postRender } from "@/lib/api";
 import type { Job, JobConfig } from "@/lib/api.types";
 
@@ -93,7 +95,15 @@ export default function ReviewPage() {
           {(edlQuery.error as ApiError | Error).message}
         </p>
       ) : edlQuery.data ? (
-        <Timeline jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
+        <>
+          <PreviewPlayer
+            jobId={jobId}
+            preset={edlPreset ?? undefined}
+            cacheKey={job.updated_at}
+          />
+          <Timeline jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
+          <Transcript jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
+        </>
       ) : null}
     </main>
   );
