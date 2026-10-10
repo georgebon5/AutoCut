@@ -28,3 +28,14 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# API runtime data
+autocut_data/
+
+# Next.js frontend
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+web/.turbo/
+web/*.tsbuildinfo
