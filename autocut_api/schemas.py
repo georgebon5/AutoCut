@@ -26,6 +26,17 @@ class JobResponse(BaseModel):
     updated_at: datetime
 
 
+class JobCreateRequest(BaseModel):
+    """Kicks off a pipeline run against one or more completed uploads."""
+    upload_ids: list[str]
+    # Pipeline flags — all optional, consumed in Task 23 when the real
+    # pipeline replaces the stub.
+    preset: str | None = None
+    hook: bool = False
+    pacing: bool = False
+    zoom: bool = False
+
+
 class CreateUploadRequest(BaseModel):
     filename: str
     total_size: int   # bytes
