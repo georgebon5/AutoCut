@@ -54,8 +54,10 @@ def _wait_until(client: TestClient, job_id: str, timeout: float = 5.0) -> dict:
 
 @pytest.fixture
 def default_client(tmp_path: Path):
+    # Explicit stub pipeline so the test does not try to run the real
+    # autocut pipeline (which needs real video files).
     cfg = _cfg(tmp_path)
-    app = create_app(cfg, max_workers=1)
+    app = create_app(cfg, pipeline_fn=run_stub_pipeline, max_workers=1)
     with TestClient(app) as client:
         yield client, cfg
 

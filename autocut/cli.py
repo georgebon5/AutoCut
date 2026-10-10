@@ -1,33 +1,22 @@
+"""CLI thin wrapper over autocut.pipeline — handles argparse + stdout output."""
+
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import click
 
-from autocut.captions import write_captions
 from autocut.config import load_config
-from autocut.features import enrich_segments
-from autocut.hook import find_hook_segment
-from autocut.keywords import enrich_segments_keywords
-from autocut.motion import enrich_segments_motion
-from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
-from autocut.scoring import score_segments
-from autocut.select import select_segments
-from autocut.edl import EDL, save_edl
-from autocut.fillers import detect_fillers, punch_out_fillers
-from autocut.ingest import IngestError, ingest_clips
-from autocut.models import Segment, SpeechRegion, Transcript
-from autocut.render import RenderError, render
-from autocut.silence import apply_silence_removal
-from autocut.takes import detect_repeated_takes
-from autocut.transcribe import load_whisper_model, transcribe_clip
-from autocut.vad import detect_speech, load_vad_model
+from autocut.pipeline import PipelineError, PipelineOptions, run_pipeline
 
 
-def _fmt(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    return f"{m}m {s:02d}s"
+class _ClickReporter:
+    """Pipeline reporter that mirrors the pre-refactor CLI output format."""
+    def stage(self, name: str, progress: float) -> None:
+        click.echo(f"\n[{int(progress * 100):3d}%] {name}...")
+
+    def info(self, message: str) -> None:
+        click.echo(f"    {message}")
 
 
 @click.group()
@@ -89,257 +78,25 @@ def ingest(
     CLIPS: one or more video files (VFR, HEVC, HDR all accepted).
     """
     cfg = ctx.obj["config"]
-    t0 = time.perf_counter()
-    do_transcribe = not no_transcribe
-    do_fillers = do_transcribe and not no_fillers
-    do_takes = do_transcribe and not no_takes
-    do_captions = do_transcribe and not no_captions
-    do_features = not no_features
+    options = PipelineOptions(
+        transcribe=not no_transcribe,
+        fillers=not no_fillers,
+        takes=not no_takes,
+        captions=not no_captions,
+        features=not no_features,
+        hook=hook_opt,
+        pacing=pacing_opt,
+        zoom=zoom_opt,
+        preset=preset,
+    )
 
-    if preset != "none" and not do_features:
-        raise click.ClickException(
-            "--preset requires feature extraction; remove --no-features."
-        )
-    if hook_opt and not do_features:
-        raise click.ClickException(
-            "--hook requires feature extraction; remove --no-features."
-        )
-    if pacing_opt:
-        if preset == "none":
-            raise click.ClickException(
-                "--pacing only affects --preset selection; combine with "
-                "--preset tight|medium|loose|all."
-            )
-        cfg.pacing.enabled = True
-    if zoom_opt:
-        if not do_features:
-            raise click.ClickException(
-                "--zoom requires feature extraction; remove --no-features."
-            )
-        cfg.zoom.enabled = True
-    if preset == "all":
-        presets_to_render = list(cfg.presets.targets.keys())
-    elif preset == "none":
-        presets_to_render = []
-    else:
-        presets_to_render = [preset]
+    click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}")
 
-    # Base: ingest, VAD, silence (3). Render + EDL are counted later per
-    # preset (1 preset = 2 steps, "all" = 6, no preset = 2).
-    n_steps = (3 + int(do_transcribe) + int(do_fillers)
-               + int(do_takes) + int(do_captions) + int(do_features))
-    click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}\n")
-
-    # ── 1. Ingest ────────────────────────────────────────────────────────────
-    click.echo(f"[1/{n_steps}] Ingesting clips (normalising to CFR proxy + 16 kHz audio)...")
     try:
-        proxies = ingest_clips(list(clips), output_dir, cfg.ingest)
-    except IngestError as e:
+        result = run_pipeline(
+            list(clips), output_dir, cfg, options, reporter=_ClickReporter(),
+        )
+    except PipelineError as e:
         raise click.ClickException(str(e)) from e
 
-    for p in proxies:
-        click.echo(
-            f"    {p.clip_id}  {_fmt(p.duration)}  "
-            f"{p.width}×{p.height}  {p.fps:.2f}fps"
-        )
-
-    # ── 2. VAD ───────────────────────────────────────────────────────────────
-    click.echo(f"\n[2/{n_steps}] VAD: detecting speech regions...")
-    vad_model, get_ts = load_vad_model()
-
-    all_regions: dict[str, list[SpeechRegion]] = {}
-    for proxy in proxies:
-        if proxy.audio_path is None:
-            all_regions[proxy.clip_id] = []
-            click.echo(f"    {proxy.clip_id}: no audio — treated as B-roll")
-            continue
-        regions = detect_speech(
-            proxy.audio_path, proxy.clip_id, cfg.vad,
-            model=vad_model, get_timestamps=get_ts,
-        )
-        all_regions[proxy.clip_id] = regions
-        speech_s = sum(r.end - r.start for r in regions)
-        silence_s = proxy.duration - speech_s
-        click.echo(
-            f"    {proxy.clip_id}: {len(regions)} regions  "
-            f"({_fmt(speech_s)} speech / {_fmt(silence_s)} silence)"
-        )
-
-    _s = 2  # running step counter (ingest=1, VAD=2 already printed)
-
-    # ── 3. Transcribe (optional) ─────────────────────────────────────────────
-    all_transcripts: dict[str, Transcript] = {}
-    if do_transcribe:
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Transcribing speech (faster-whisper {cfg.transcribe.model_size})...")
-        whisper = load_whisper_model(cfg.transcribe)
-        for proxy in proxies:
-            if proxy.audio_path is None:
-                all_transcripts[proxy.clip_id] = Transcript(
-                    clip_id=proxy.clip_id, language=cfg.transcribe.language, words=[]
-                )
-                continue
-            t = transcribe_clip(
-                proxy.audio_path,
-                all_regions[proxy.clip_id],
-                proxy.clip_id,
-                cfg.transcribe,
-                model=whisper,
-            )
-            all_transcripts[proxy.clip_id] = t
-            click.echo(f"    {proxy.clip_id}: {len(t.words)} words  [{t.language}]")
-
-    # ── 4. Filler detection (optional) ───────────────────────────────────────
-    all_filler_cuts: dict[str, list[Segment]] = {p.clip_id: [] for p in proxies}
-    if do_fillers:
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Detecting filler words...")
-        for proxy in proxies:
-            transcript = all_transcripts.get(proxy.clip_id)
-            if transcript is None:
-                continue
-            cuts = detect_fillers(transcript, cfg.fillers)
-            all_filler_cuts[proxy.clip_id] = cuts
-            click.echo(f"    {proxy.clip_id}: {len(cuts)} filler(s)")
-
-    # ── 5. Repeated take detection (optional) ────────────────────────────────
-    all_take_cuts: dict[str, list[Segment]] = {p.clip_id: [] for p in proxies}
-    if do_takes:
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Detecting repeated takes...")
-        for proxy in proxies:
-            transcript = all_transcripts.get(proxy.clip_id)
-            if transcript is None:
-                continue
-            cuts = detect_repeated_takes(transcript, cfg.takes)
-            all_take_cuts[proxy.clip_id] = cuts
-            click.echo(f"    {proxy.clip_id}: {len(cuts)} repeated take(s)")
-
-    # ── 6. Silence removal ───────────────────────────────────────────────────
-    _s += 1
-    click.echo(f"\n[{_s}/{n_steps}] Applying silence removal...")
-    all_segments: list[Segment] = []
-    for proxy in proxies:
-        word_ts = (
-            all_transcripts[proxy.clip_id].to_snap_format()
-            if proxy.clip_id in all_transcripts else []
-        )
-        segs = apply_silence_removal(
-            all_regions[proxy.clip_id],
-            proxy.clip_id,
-            proxy.duration,
-            cfg.silence,
-            word_timestamps=word_ts or None,
-        )
-        extra_cuts = all_filler_cuts[proxy.clip_id] + all_take_cuts[proxy.clip_id]
-        segs = punch_out_fillers(segs, extra_cuts)
-        all_segments.extend(segs)
-        n_cut = sum(1 for s in segs if s.decision == "cut")
-        removed = sum(s.duration for s in segs if s.decision == "cut")
-        click.echo(
-            f"    {proxy.clip_id}: {n_cut} cut(s), {_fmt(removed)} removed"
-        )
-
-    dur_kept = sum(s.duration for s in all_segments if s.decision == "keep")
-    dur_total = sum(p.duration for p in proxies)
-    pct = 100 * dur_kept / dur_total if dur_total else 0
-    click.echo(f"    → keeping {_fmt(dur_kept)} of {_fmt(dur_total)} ({pct:.0f}%)")
-
-    # ── Audio + motion features + interest scoring (optional) ────────────────
-    if do_features:
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Extracting features + scoring interest...")
-        for proxy in proxies:
-            segs = [s for s in all_segments if s.clip_id == proxy.clip_id]
-            transcript = all_transcripts.get(proxy.clip_id)
-            enrich_segments(segs, proxy.audio_path, transcript)
-            enrich_segments_motion(segs, proxy.proxy_path)
-            enrich_segments_keywords(segs, transcript, cfg.keywords)
-            boundaries = detect_scene_boundaries(proxy.proxy_path, cfg.scenes)
-            enrich_segments_scenes(segs, {proxy.clip_id: boundaries}, cfg.scenes)
-            score_segments(segs, cfg.scoring)
-            n_enriched = sum(1 for s in segs if s.features)
-            avg_score = (
-                sum(s.interest_score for s in segs if s.decision == "keep") /
-                max(1, sum(1 for s in segs if s.decision == "keep"))
-            )
-            click.echo(
-                f"    {proxy.clip_id}: {n_enriched} segment(s) enriched"
-                f"  avg score {avg_score:.2f}"
-            )
-
-    # ── Hook suggestion (optional) ───────────────────────────────────────────
-    # Picked once from all scored keep segments so the same opening teaser
-    # applies across every preset render.
-    hook_seg = find_hook_segment(all_segments, cfg.hook) if hook_opt else None
-    if hook_opt:
-        if hook_seg is None:
-            click.echo("\n  hook: no eligible segment (nothing meets min duration)")
-        else:
-            click.echo(
-                f"\n  hook: {hook_seg.clip_id} @ "
-                f"{hook_seg.start:.2f}-{hook_seg.end:.2f}s "
-                f"(score {hook_seg.interest_score:.2f})"
-            )
-
-    # ── Render + EDL ─────────────────────────────────────────────────────────
-    # Without a preset, we emit the full silence-removed cut (rough_cut.mp4 +
-    # edl.json). With preset(s), each pass runs select_segments on a copy of
-    # all_segments and writes rough_cut_<preset>.mp4 + edl_<preset>.json so the
-    # upstream decision list stays untouched between passes.
-    def _render_pass(segs: list[Segment], video_name: str, edl_name: str) -> None:
-        nonlocal _s
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Rendering {video_name}...")
-        try:
-            out_mp4 = render(proxies, segs, output_dir, cfg.render,
-                             output_name=video_name, hook=hook_seg,
-                             zoom=cfg.zoom)
-        except RenderError as e:
-            raise click.ClickException(str(e)) from e
-        click.echo(f"    → {out_mp4}")
-
-        _s += 1
-        click.echo(f"\n[{_s}/{n_steps}] Saving {edl_name}...")
-        edl = EDL(
-            clips=proxies,
-            segments=segs,
-            transcripts=list(all_transcripts.values()),
-            hook=hook_seg,
-        )
-        edl_path = output_dir / edl_name
-        save_edl(edl, edl_path)
-        click.echo(f"    → {edl_path}")
-
-    if not presets_to_render:
-        n_steps += 2
-        _render_pass(all_segments, "rough_cut.mp4", "edl.json")
-    else:
-        n_steps += 2 * len(presets_to_render)
-        for p in presets_to_render:
-            segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
-            kept_dur = sum(s.duration for s in segs if s.decision == "keep")
-            target = cfg.presets.targets[p]
-            click.echo(
-                f"\n  preset={p}: target {target:.0f}s, "
-                f"selected {kept_dur:.0f}s "
-                f"({sum(1 for s in segs if s.decision == 'keep')} keep / "
-                f"{sum(1 for s in segs if s.decision == 'cut')} cut)"
-            )
-            _render_pass(segs, f"rough_cut_{p}.mp4", f"edl_{p}.json")
-
-    # ── Captions (optional) ───────────────────────────────────────────────────
-    if do_captions:
-        _s += 1
-        fmts = ", ".join(cfg.captions.formats)
-        click.echo(f"\n[{_s}/{n_steps}] Writing captions ({fmts})...")
-        for proxy in proxies:
-            transcript = all_transcripts.get(proxy.clip_id)
-            if transcript is None or not transcript.words:
-                continue
-            written = write_captions(transcript, cfg.captions, output_dir, proxy.clip_id)
-            for fmt, path in written.items():
-                click.echo(f"    {proxy.clip_id} [{fmt}] → {path}")
-
-    elapsed = time.perf_counter() - t0
-    click.echo(f"\nDone in {elapsed:.1f}s")
+    click.echo(f"\nDone in {result.elapsed_s:.1f}s")

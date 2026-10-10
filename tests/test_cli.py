@@ -59,11 +59,11 @@ def _fake_enrich_motion(segments, proxy_path, sample_fps=5.0):
 
 
 def _patch_pipeline(monkeypatch):
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
-    monkeypatch.setattr("autocut.cli.load_whisper_model", _fake_load_whisper)
-    monkeypatch.setattr("autocut.cli.transcribe_clip", _fake_transcribe)
-    monkeypatch.setattr("autocut.cli.enrich_segments", _fake_enrich)
-    monkeypatch.setattr("autocut.cli.enrich_segments_motion", _fake_enrich_motion)
+    monkeypatch.setattr("autocut.pipeline.load_vad_model", _fake_load_vad)
+    monkeypatch.setattr("autocut.pipeline.load_whisper_model", _fake_load_whisper)
+    monkeypatch.setattr("autocut.pipeline.transcribe_clip", _fake_transcribe)
+    monkeypatch.setattr("autocut.pipeline.enrich_segments", _fake_enrich)
+    monkeypatch.setattr("autocut.pipeline.enrich_segments_motion", _fake_enrich_motion)
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +201,9 @@ def test_ingest_no_av_drift(tmp_path, monkeypatch):
 @skip_no_ffmpeg
 def test_ingest_no_transcribe_flag(tmp_path, monkeypatch):
     """--no-transcribe must skip Whisper and still produce output."""
-    monkeypatch.setattr("autocut.cli.load_vad_model", _fake_load_vad)
-    monkeypatch.setattr("autocut.cli.enrich_segments", _fake_enrich)
-    monkeypatch.setattr("autocut.cli.enrich_segments_motion", _fake_enrich_motion)
+    monkeypatch.setattr("autocut.pipeline.load_vad_model", _fake_load_vad)
+    monkeypatch.setattr("autocut.pipeline.enrich_segments", _fake_enrich)
+    monkeypatch.setattr("autocut.pipeline.enrich_segments_motion", _fake_enrich_motion)
     clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
     runner = CliRunner()
     result = runner.invoke(

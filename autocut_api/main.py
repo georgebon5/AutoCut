@@ -17,14 +17,15 @@ from fastapi import FastAPI
 from autocut_api import __version__
 from autocut_api.config import ApiConfig
 from autocut_api.database import Base, make_engine, make_session_factory
-from autocut_api.jobs import PipelineFn, run_stub_pipeline
+from autocut_api.jobs import PipelineFn
+from autocut_api.pipeline_bridge import run_api_pipeline
 from autocut_api.routes import health, jobs, uploads
 from autocut_api.runner import JobRunner
 
 
 def create_app(
     cfg: ApiConfig | None = None,
-    pipeline_fn: PipelineFn = run_stub_pipeline,
+    pipeline_fn: PipelineFn = run_api_pipeline,
     max_workers: int = 2,
 ) -> FastAPI:
     cfg = cfg or ApiConfig()
