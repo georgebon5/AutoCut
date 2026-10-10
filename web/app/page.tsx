@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 
 import { getHealth, listJobs } from "@/lib/api";
 import type { Job } from "@/lib/api.types";
@@ -27,6 +28,13 @@ export default function HomePage() {
         <HealthBadge status={health.data?.status} version={health.data?.version} />
       </header>
 
+      <Link
+        href="/upload"
+        className="rounded-lg bg-emerald-500 px-4 py-3 text-center text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
+      >
+        + Upload clips
+      </Link>
+
       <section>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
           Jobs
@@ -45,7 +53,7 @@ export default function HomePage() {
           </ul>
         ) : (
           <p className="text-sm text-gray-500">
-            No jobs yet. Upload clips to get started.
+            No jobs yet. Tap “Upload clips” above to get started.
           </p>
         )}
       </section>
