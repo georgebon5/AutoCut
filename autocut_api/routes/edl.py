@@ -26,11 +26,11 @@ router = APIRouter(prefix="/jobs", tags=["edl"])
 _VALID_DECISIONS = ("keep", "cut")
 
 
-def _edl_filename(preset: str) -> str:
+def edl_filename(preset: str) -> str:
     return "edl.json" if preset == "none" else f"edl_{preset}.json"
 
 
-def _resolve_edl_path(job: Job, preset_query: str | None) -> Path:
+def resolve_edl_path(job: Job, preset_query: str | None) -> Path:
     """Pick the EDL file to operate on, favouring ``?preset=X`` over job config.
 
     For jobs created with preset=all, the client MUST pass ``?preset=X`` so the
@@ -52,7 +52,7 @@ def _resolve_edl_path(job: Job, preset_query: str | None) -> Path:
             )
         chosen = job_preset
 
-    path = workspace / _edl_filename(chosen)
+    path = workspace / edl_filename(chosen)
     if not path.exists():
         raise HTTPException(
             status_code=404,
@@ -61,7 +61,7 @@ def _resolve_edl_path(job: Job, preset_query: str | None) -> Path:
     return path
 
 
-def _get_done_job(session: Session, job_id: str) -> Job:
+def get_done_job(session: Session, job_id: str) -> Job:
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
@@ -80,8 +80,8 @@ def get_edl(
     session: Session = Depends(get_db),
 ) -> dict:
     """Return the full EDL (segments, transcripts, hook) as JSON."""
-    job = _get_done_job(session, job_id)
-    path = _resolve_edl_path(job, preset)
+    job = get_done_job(session, job_id)
+    path = resolve_edl_path(job, preset)
     return edl_to_dict(load_edl(path))
 
 
@@ -100,8 +100,8 @@ def patch_segment(
             detail=f"decision must be one of {list(_VALID_DECISIONS)}",
         )
 
-    job = _get_done_job(session, job_id)
-    path = _resolve_edl_path(job, preset)
+    job = get_done_job(session, job_id)
+    path = resolve_edl_path(job, preset)
     edl = load_edl(path)
 
     if index < 0 or index >= len(edl.segments):

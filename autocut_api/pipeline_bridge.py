@@ -15,12 +15,14 @@ from typing import Sequence
 from sqlalchemy.orm import sessionmaker
 
 from autocut.config import load_config
+from autocut.edl import load_edl
 from autocut.pipeline import (
     PipelineError,
     PipelineOptions,
     PipelineReporter,
     run_pipeline,
 )
+from autocut.render import RenderError, render
 from autocut_api.jobs import update_job
 from autocut_api.models import Job
 
@@ -86,3 +88,50 @@ def run_api_pipeline(
             session_factory, job_id,
             status="failed", stage="error", error=f"{type(e).__name__}: {e}",
         )
+
+
+def rerender_from_edl(
+    job_id: str,
+    workspace: Path,
+    edl_path: Path,
+    output_name: str,
+    session_factory: sessionmaker,
+) -> None:
+    """Re-render ``output_name`` using the EDL on disk — no re-analysis.
+
+    This is the caching path that makes toggling-a-segment-and-re-rendering
+    fast: proxies are already extracted, segments + hook + features are in
+    the EDL, so we skip ingest, VAD, transcribe, scoring entirely and jump
+    straight to the ffmpeg concat.
+    """
+    try:
+        update_job(session_factory, job_id,
+                   status="running", stage="rendering", progress=0.9)
+
+        cfg = load_config()
+        with session_factory() as session:
+            job = session.get(Job, job_id)
+            opts = json.loads(job.config_json) if (job and job.config_json) else {}
+        if opts.get("zoom"):
+            cfg.zoom.enabled = True
+
+        edl = load_edl(edl_path)
+        render(
+            proxies=edl.clips,
+            segments=edl.segments,
+            output_dir=workspace,
+            cfg=cfg.render,
+            output_name=output_name,
+            hook=edl.hook,
+            zoom=cfg.zoom,
+        )
+        update_job(session_factory, job_id,
+                   status="done", stage="complete", progress=1.0)
+    except RenderError as e:
+        update_job(session_factory, job_id,
+                   status="failed", stage="error", error=f"render failed: {e}")
+    except Exception as e:   # noqa: BLE001
+        log.exception("re-render crashed for job %s", job_id)
+        update_job(session_factory, job_id,
+                   status="failed", stage="error",
+                   error=f"{type(e).__name__}: {e}")
