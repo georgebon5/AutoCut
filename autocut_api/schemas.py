@@ -90,3 +90,13 @@ class SegmentResponse(BaseModel):
     interest_score: float
     reasons: list[str]
     features: dict
+
+
+class OutputFile(BaseModel):
+    name: str
+    size: int        # bytes
+    kind: str        # "video" | "edl" | "captions_srt" | "captions_ass"
+
+
+class OutputsListResponse(BaseModel):
+    outputs: list[OutputFile]
