@@ -100,3 +100,23 @@ class OutputFile(BaseModel):
 
 class OutputsListResponse(BaseModel):
     outputs: list[OutputFile]
+
+
+class OverrideRecord(BaseModel):
+    """One user override event, as persisted in SegmentOverride."""
+    id: int
+    job_id: str
+    preset: str
+    segment_index: int
+    clip_id: str
+    segment_start: float
+    segment_end: float
+    previous_decision: str
+    new_decision: str
+    interest_score: float
+    features: dict
+    created_at: datetime
+
+
+class OverridesListResponse(BaseModel):
+    overrides: list[OverrideRecord]

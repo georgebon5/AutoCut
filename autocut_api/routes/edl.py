@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from autocut.edl import edl_to_dict, load_edl, save_edl
 from autocut_api.dependencies import get_db
-from autocut_api.models import Job
+from autocut_api.models import Job, SegmentOverride
 from autocut_api.schemas import SegmentResponse, SegmentUpdate
 
 router = APIRouter(prefix="/jobs", tags=["edl"])
@@ -30,11 +30,11 @@ def edl_filename(preset: str) -> str:
     return "edl.json" if preset == "none" else f"edl_{preset}.json"
 
 
-def resolve_edl_path(job: Job, preset_query: str | None) -> Path:
+def resolve_edl(job: Job, preset_query: str | None) -> tuple[str, Path]:
     """Pick the EDL file to operate on, favouring ``?preset=X`` over job config.
 
     For jobs created with preset=all, the client MUST pass ``?preset=X`` so the
-    intent is explicit.
+    intent is explicit. Returns ``(preset_label, edl_path)``.
     """
     if not job.workspace:
         raise HTTPException(status_code=409, detail="job has no workspace")
@@ -58,7 +58,12 @@ def resolve_edl_path(job: Job, preset_query: str | None) -> Path:
             status_code=404,
             detail=f"EDL {path.name} not found in workspace",
         )
-    return path
+    return chosen, path
+
+
+def resolve_edl_path(job: Job, preset_query: str | None) -> Path:
+    """Backwards-compatible wrapper returning only the path."""
+    return resolve_edl(job, preset_query)[1]
 
 
 def get_done_job(session: Session, job_id: str) -> Job:
@@ -101,7 +106,7 @@ def patch_segment(
         )
 
     job = get_done_job(session, job_id)
-    path = resolve_edl_path(job, preset)
+    preset_label, path = resolve_edl(job, preset)
     edl = load_edl(path)
 
     if index < 0 or index >= len(edl.segments):
@@ -111,10 +116,29 @@ def patch_segment(
         )
 
     seg = edl.segments[index]
+    previous_decision = seg.decision
+
+    # Snapshot the override BEFORE mutating state — the row is append-only
+    # training data; the first row for a (job, preset, segment) carries the
+    # pipeline's original auto_decision as its previous_decision.
+    session.add(SegmentOverride(
+        job_id=job.id,
+        preset=preset_label,
+        segment_index=index,
+        clip_id=seg.clip_id,
+        segment_start=seg.start,
+        segment_end=seg.end,
+        previous_decision=previous_decision,
+        new_decision=update.decision,
+        interest_score=seg.interest_score,
+        features_json=json.dumps(seg.features),
+    ))
+
     seg.decision = update.decision   # type: ignore[assignment]
     seg.decision_source = "user"
     seg.reasons.append(f"user {update.decision}")
     save_edl(edl, path)
+    session.commit()
 
     return SegmentResponse(
         index=index,

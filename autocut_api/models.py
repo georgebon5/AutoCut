@@ -54,6 +54,33 @@ class Job(Base):
     )
 
 
+class SegmentOverride(Base):
+    """One row per PATCH-triggered keep/cut flip. Append-only.
+
+    Feeds the Phase 5 training dataset: ``previous_decision`` of the first
+    row for a given (job_id, preset, segment_index) is the pipeline's
+    original ``auto_decision``; later rows carry the ping-pong history of
+    user flips. ``features_json`` snapshots the segment features at override
+    time so the record is self-contained even if the EDL is later rewritten.
+    """
+    __tablename__ = "segment_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    preset: Mapped[str] = mapped_column(String(16), nullable=False)   # none|tight|medium|loose
+    segment_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    clip_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    segment_start: Mapped[float] = mapped_column(Float, nullable=False)
+    segment_end: Mapped[float] = mapped_column(Float, nullable=False)
+    previous_decision: Mapped[str] = mapped_column(String(8), nullable=False)
+    new_decision: Mapped[str] = mapped_column(String(8), nullable=False)
+    interest_score: Mapped[float] = mapped_column(Float, nullable=False)
+    features_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow_naive, nullable=False
+    )
+
+
 # Valid upload statuses: pending → uploading → complete | failed
 UPLOAD_STATUSES = ("pending", "uploading", "complete", "failed")
 
