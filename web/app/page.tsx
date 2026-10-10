@@ -76,8 +76,8 @@ function HealthBadge({ status, version }: { status?: string; version?: string })
 
 function JobRow({ job }: { job: Job }) {
   const pct = Math.round(job.progress * 100);
-  return (
-    <li className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
+  const inner = (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 transition hover:border-gray-700">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium" title={job.id}>
@@ -100,8 +100,19 @@ function JobRow({ job }: { job: Job }) {
       {job.error ? (
         <p className="mt-2 text-xs text-red-400">{job.error}</p>
       ) : null}
-    </li>
+    </div>
   );
+
+  // Only completed jobs have an EDL to review; link only then so stale
+  // navigation into an unfinished job can't happen.
+  if (job.status === "done") {
+    return (
+      <li>
+        <Link href={`/jobs/${job.id}/review`}>{inner}</Link>
+      </li>
+    );
+  }
+  return <li>{inner}</li>;
 }
 
 function StatusChip({ status }: { status: Job["status"] }) {

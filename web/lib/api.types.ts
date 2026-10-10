@@ -80,8 +80,20 @@ export interface SegmentDict {
   reasons: string[];
 }
 
+export interface Clip {
+  clip_id: string;
+  original_path: string;
+  proxy_path: string;
+  audio_path: string | null;
+  duration: number;
+  fps: number;
+  width: number;
+  height: number;
+  creation_time: string | null;
+}
+
 export interface Edl {
-  clips: Record<string, unknown>[];
+  clips: Clip[];
   segments: SegmentDict[];
   transcripts: Record<string, unknown>[];
   hook: SegmentDict | null;
