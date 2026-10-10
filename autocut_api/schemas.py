@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class HealthResponse(BaseModel):
@@ -13,8 +13,11 @@ class HealthResponse(BaseModel):
 
 
 class JobResponse(BaseModel):
-    """Serializable view of a Job row — matches the ORM model field-for-field."""
-    model_config = ConfigDict(from_attributes=True)
+    """Serializable view of a Job row.
+
+    ``config`` is the parsed JSON of ``Job.config_json`` so clients don't have
+    to re-decode it; serialisation is done manually in the route handler.
+    """
 
     id: str
     status: str
@@ -22,6 +25,7 @@ class JobResponse(BaseModel):
     progress: float
     error: str | None
     workspace: str | None
+    config: dict | None
     created_at: datetime
     updated_at: datetime
 

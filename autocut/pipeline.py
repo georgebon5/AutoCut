@@ -98,7 +98,13 @@ _STAGE_PROGRESS = {
 }
 
 
-def _validate(options: PipelineOptions) -> None:
+def validate_options(options: PipelineOptions) -> None:
+    """Raise PipelineError if any option combination is invalid.
+
+    Callers that want to fail fast at request time (e.g. the HTTP API)
+    should invoke this directly before enqueueing a job; ``run_pipeline``
+    also calls it so a bare in-process invocation stays safe.
+    """
     if options.preset not in ("none", "tight", "medium", "loose", "all"):
         raise PipelineError(f"unknown preset '{options.preset}'")
     if options.preset != "none" and not options.features:
@@ -126,7 +132,7 @@ def run_pipeline(
     t0 = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    _validate(options)
+    validate_options(options)
     if options.pacing:
         cfg.pacing.enabled = True
     if options.zoom:

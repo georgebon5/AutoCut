@@ -7,6 +7,7 @@ updates, so a client polling ``GET /jobs/{id}`` sees live progress.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Sequence
@@ -21,6 +22,7 @@ from autocut.pipeline import (
     run_pipeline,
 )
 from autocut_api.jobs import update_job
+from autocut_api.models import Job
 
 log = logging.getLogger("autocut_api.pipeline_bridge")
 
@@ -44,6 +46,15 @@ class JobReporter:
         log.info("job %s: %s", self._job_id, message)
 
 
+def _load_options(session_factory: sessionmaker, job_id: str) -> PipelineOptions:
+    """Reconstruct PipelineOptions from the Job's stored config_json."""
+    with session_factory() as session:
+        job = session.get(Job, job_id)
+        raw = job.config_json if job else None
+    data = json.loads(raw) if raw else {}
+    return PipelineOptions(**data)
+
+
 def run_api_pipeline(
     job_id: str,
     workspace: Path,
@@ -52,13 +63,13 @@ def run_api_pipeline(
 ) -> None:
     """Execute the real autocut pipeline, updating the Job row along the way.
 
-    Uses default options for MVP (full pipeline, no preset / hook / pacing /
-    zoom). Task 24 will wire per-job options from the create-job request.
+    Pipeline options are read from the Job's ``config_json`` column, which was
+    populated at job creation time from the HTTP request.
     """
     reporter = JobReporter(session_factory, job_id)
     try:
         cfg = load_config()
-        options = PipelineOptions()
+        options = _load_options(session_factory, job_id)
         run_pipeline(list(clip_paths), workspace, cfg, options, reporter=reporter)
         update_job(
             session_factory, job_id,

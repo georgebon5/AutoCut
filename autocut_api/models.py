@@ -41,6 +41,11 @@ class Job(Base):
     # by the API when the job is created.
     workspace: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
+    # JSON blob of PipelineOptions chosen at job creation (preset/hook/etc.).
+    # The runner deserialises this to drive the pipeline; keeping it on the
+    # row makes jobs self-describing and reruns trivial.
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow_naive, nullable=False
     )

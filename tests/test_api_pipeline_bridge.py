@@ -209,3 +209,58 @@ def test_bridge_reports_progress_through_stages(tmp_path: Path, patched):
         job_id = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
         final = _wait_until(client, job_id, timeout=60.0)
         assert final["stage"] == "complete"
+
+
+# ---------------------------------------------------------------------------
+# Options from request → pipeline (Task 24)
+# ---------------------------------------------------------------------------
+
+@skip_no_ffmpeg
+def test_bridge_passes_request_options_to_pipeline(tmp_path: Path):
+    """Options chosen at job creation should drive the actual run.
+
+    We intercept run_pipeline inside the bridge to capture the resolved
+    PipelineOptions, so the test runs in milliseconds.
+    """
+    captured: dict = {}
+
+    def fake_run_pipeline(clips, output_dir, cfg, options, reporter=None):
+        captured["options"] = options
+        if reporter is not None:
+            reporter.stage("rendering", 0.95)
+
+    import autocut_api.pipeline_bridge as bridge
+    cfg = _cfg(tmp_path)
+    app = create_app(cfg, max_workers=1)
+    with TestClient(app) as client:
+        # Monkey-patch inside the bridge module.
+        original = bridge.run_pipeline
+        bridge.run_pipeline = fake_run_pipeline
+        try:
+            # Create a dummy "completed" upload so the create-job validation passes.
+            from autocut_api.models import Upload
+            with app.state.session_factory() as session:
+                dummy = tmp_path / "dummy.mp4"
+                dummy.write_bytes(b"\0")
+                up = Upload(
+                    filename="dummy.mp4", total_size=1,
+                    chunk_size=cfg.upload_chunk_size, total_chunks=1,
+                    status="complete", final_path=str(dummy),
+                )
+                session.add(up)
+                session.commit()
+                uid = up.id
+
+            jid = client.post("/jobs", json={
+                "upload_ids": [uid],
+                "preset": "tight", "hook": True, "zoom": True,
+            }).json()["id"]
+            _wait_until(client, jid, timeout=5.0)
+        finally:
+            bridge.run_pipeline = original
+
+    opts = captured["options"]
+    assert opts.preset == "tight"
+    assert opts.hook is True
+    assert opts.zoom is True
+    assert opts.pacing is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from autocut_api.config import ApiConfig
 from autocut_api.jobs import run_stub_pipeline, update_job
 from autocut_api.main import create_app
+from autocut_api.models import Job
 
 
 SMALL_CHUNK = 1024
@@ -228,3 +230,81 @@ def test_openapi_includes_job_routes(default_client):
     paths = schema["paths"]
     assert "/jobs" in paths
     assert "/jobs/{job_id}" in paths
+
+
+# ---------------------------------------------------------------------------
+# Options persistence (Task 24)
+# ---------------------------------------------------------------------------
+
+def test_defaults_persisted_when_no_options_in_request(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    body = client.post("/jobs", json={"upload_ids": [uid]}).json()
+    assert body["config"] == {
+        "preset": "none", "hook": False, "pacing": False, "zoom": False,
+    }
+
+
+def test_options_persisted_to_config(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    body = client.post("/jobs", json={
+        "upload_ids": [uid],
+        "preset": "medium", "hook": True, "pacing": True, "zoom": True,
+    }).json()
+    assert body["config"] == {
+        "preset": "medium", "hook": True, "pacing": True, "zoom": True,
+    }
+
+
+def test_config_round_trips_through_get(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    created = client.post("/jobs", json={
+        "upload_ids": [uid], "preset": "tight", "hook": True,
+    }).json()
+    _wait_until(client, created["id"])
+    fetched = client.get(f"/jobs/{created['id']}").json()
+    assert fetched["config"]["preset"] == "tight"
+    assert fetched["config"]["hook"] is True
+
+
+def test_config_stored_in_db_as_json(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    jid = client.post("/jobs", json={
+        "upload_ids": [uid], "preset": "loose",
+    }).json()["id"]
+    with client.app.state.session_factory() as session:
+        job = session.get(Job, jid)
+        assert job.config_json
+        assert json.loads(job.config_json)["preset"] == "loose"
+
+
+# ---------------------------------------------------------------------------
+# Options validation (Task 24)
+# ---------------------------------------------------------------------------
+
+def test_invalid_preset_returns_400(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    r = client.post("/jobs", json={"upload_ids": [uid], "preset": "ultra"})
+    assert r.status_code == 400
+    assert "unknown preset" in r.json()["detail"]
+
+
+def test_pacing_without_preset_returns_400(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    r = client.post("/jobs", json={"upload_ids": [uid], "pacing": True})
+    assert r.status_code == 400
+    assert "pacing" in r.json()["detail"].lower()
+
+
+def test_invalid_options_not_persisted(default_client):
+    """Validation failure must not leak a half-created Job row."""
+    client, _ = default_client
+    uid = _completed_upload(client)
+    client.post("/jobs", json={"upload_ids": [uid], "preset": "ultra"})
+    r = client.get("/jobs").json()
+    assert r == []    # no jobs were persisted
