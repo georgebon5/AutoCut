@@ -44,7 +44,13 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
 
 
 def _options_to_json(opts: PipelineOptions) -> str:
-    return json.dumps({k: getattr(opts, k) for k in _API_OPTION_KEYS})
+    data: dict = {k: getattr(opts, k) for k in _API_OPTION_KEYS}
+    if opts.model_path is not None:
+        # JSON can't carry Path; stringify. ``model_used`` is a display-only
+        # flag the UI reads to show "scored with trained model".
+        data["model_path"] = str(opts.model_path)
+        data["model_used"] = True
+    return json.dumps(data)
 
 
 def _job_response(job: Job) -> JobResponse:
@@ -89,6 +95,11 @@ def create_job(
         clip_paths.append(Path(up.final_path))
 
     options = _options_from_request(body)
+    # Apply the admin-set trained model (if any) to every job. It's set once
+    # by the operator via AUTOCUT_API_MODEL_PATH and benefits all uploads
+    # automatically — the client doesn't need to know it exists.
+    if cfg.model_path is not None and cfg.model_path.exists():
+        options.model_path = cfg.model_path
     try:
         validate_options(options)
     except PipelineError as e:

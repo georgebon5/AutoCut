@@ -20,6 +20,11 @@ class ApiConfig(BaseSettings):
     # this so chunk indexing is deterministic across clients.
     upload_chunk_size: int = 5 * 1024 * 1024    # 5 MB
 
+    # Optional path to a trained LogisticModel (autocut train output).
+    # When set, every new job's pipeline is scored by this model instead of
+    # the hand-tuned heuristic weights.
+    model_path: Path | None = None
+
     model_config = SettingsConfigDict(env_prefix="AUTOCUT_API_", extra="ignore")
 
     @property

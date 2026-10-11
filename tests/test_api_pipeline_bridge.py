@@ -264,3 +264,159 @@ def test_bridge_passes_request_options_to_pipeline(tmp_path: Path):
     assert opts.hook is True
     assert opts.zoom is True
     assert opts.pacing is False
+
+
+# ---------------------------------------------------------------------------
+# Server-side model_path threading
+# ---------------------------------------------------------------------------
+
+@skip_no_ffmpeg
+def test_server_side_model_reaches_pipeline(tmp_path: Path):
+    """AUTOCUT_API_MODEL_PATH on the server → PipelineOptions.model_path on every job."""
+    import autocut_api.pipeline_bridge as bridge
+    captured: dict = {}
+
+    def fake_run_pipeline(clips, output_dir, cfg_, options, reporter=None):
+        captured["options"] = options
+        if reporter is not None:
+            reporter.stage("rendering", 0.95)
+
+    model_path = tmp_path / "model.json"
+    model_path.write_text("{}")   # existence is all that matters here
+
+    cfg = _cfg(tmp_path)
+    cfg.model_path = model_path
+    app = create_app(cfg, max_workers=1)
+    with TestClient(app) as client:
+        original = bridge.run_pipeline
+        bridge.run_pipeline = fake_run_pipeline
+        try:
+            from autocut_api.models import Upload
+            with app.state.session_factory() as session:
+                dummy = tmp_path / "dummy.mp4"
+                dummy.write_bytes(b"\0")
+                up = Upload(
+                    filename="dummy.mp4", total_size=1,
+                    chunk_size=cfg.upload_chunk_size, total_chunks=1,
+                    status="complete", final_path=str(dummy),
+                )
+                session.add(up)
+                session.commit()
+                uid = up.id
+            jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+            _wait_until(client, jid, timeout=5.0)
+        finally:
+            bridge.run_pipeline = original
+
+    assert captured["options"].model_path == model_path
+
+
+def test_server_without_model_path_leaves_options_untouched(tmp_path: Path):
+    """When cfg.model_path is None, Job.config.model_used must be falsy."""
+    import autocut_api.pipeline_bridge as bridge
+    captured: dict = {}
+
+    def fake_run_pipeline(clips, output_dir, cfg_, options, reporter=None):
+        captured["options"] = options
+        if reporter is not None:
+            reporter.stage("rendering", 0.95)
+
+    cfg = _cfg(tmp_path)
+    app = create_app(cfg, max_workers=1)
+    with TestClient(app) as client:
+        original = bridge.run_pipeline
+        bridge.run_pipeline = fake_run_pipeline
+        try:
+            from autocut_api.models import Upload
+            with app.state.session_factory() as session:
+                dummy = tmp_path / "dummy.mp4"
+                dummy.write_bytes(b"\0")
+                up = Upload(
+                    filename="dummy.mp4", total_size=1,
+                    chunk_size=cfg.upload_chunk_size, total_chunks=1,
+                    status="complete", final_path=str(dummy),
+                )
+                session.add(up)
+                session.commit()
+                uid = up.id
+            response = client.post("/jobs", json={"upload_ids": [uid]}).json()
+            _wait_until(client, response["id"], timeout=5.0)
+        finally:
+            bridge.run_pipeline = original
+
+    assert captured["options"].model_path is None
+    assert response["config"].get("model_used") is None
+
+
+def test_server_side_model_exposes_model_used_in_job_response(tmp_path: Path):
+    import autocut_api.pipeline_bridge as bridge
+
+    def no_op(clips, output_dir, cfg_, options, reporter=None):
+        if reporter is not None:
+            reporter.stage("rendering", 0.95)
+
+    model_path = tmp_path / "model.json"
+    model_path.write_text("{}")
+
+    cfg = _cfg(tmp_path)
+    cfg.model_path = model_path
+    app = create_app(cfg, max_workers=1)
+    with TestClient(app) as client:
+        original = bridge.run_pipeline
+        bridge.run_pipeline = no_op
+        try:
+            from autocut_api.models import Upload
+            with app.state.session_factory() as session:
+                dummy = tmp_path / "dummy.mp4"
+                dummy.write_bytes(b"\0")
+                up = Upload(
+                    filename="dummy.mp4", total_size=1,
+                    chunk_size=cfg.upload_chunk_size, total_chunks=1,
+                    status="complete", final_path=str(dummy),
+                )
+                session.add(up)
+                session.commit()
+                uid = up.id
+            response = client.post("/jobs", json={"upload_ids": [uid]}).json()
+        finally:
+            bridge.run_pipeline = original
+
+    assert response["config"]["model_used"] is True
+    assert response["config"]["model_path"] == str(model_path)
+
+
+def test_server_side_model_ignored_when_file_missing(tmp_path: Path):
+    """Point the config at a non-existent model → treat as not set, don't crash."""
+    import autocut_api.pipeline_bridge as bridge
+    captured: dict = {}
+
+    def fake_run_pipeline(clips, output_dir, cfg_, options, reporter=None):
+        captured["options"] = options
+        if reporter is not None:
+            reporter.stage("rendering", 0.95)
+
+    cfg = _cfg(tmp_path)
+    cfg.model_path = tmp_path / "missing.json"       # does NOT exist
+    app = create_app(cfg, max_workers=1)
+    with TestClient(app) as client:
+        original = bridge.run_pipeline
+        bridge.run_pipeline = fake_run_pipeline
+        try:
+            from autocut_api.models import Upload
+            with app.state.session_factory() as session:
+                dummy = tmp_path / "dummy.mp4"
+                dummy.write_bytes(b"\0")
+                up = Upload(
+                    filename="dummy.mp4", total_size=1,
+                    chunk_size=cfg.upload_chunk_size, total_chunks=1,
+                    status="complete", final_path=str(dummy),
+                )
+                session.add(up)
+                session.commit()
+                uid = up.id
+            jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+            _wait_until(client, jid, timeout=5.0)
+        finally:
+            bridge.run_pipeline = original
+
+    assert captured["options"].model_path is None

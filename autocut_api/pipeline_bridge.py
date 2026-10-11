@@ -49,12 +49,23 @@ class JobReporter:
 
 
 def _load_options(session_factory: sessionmaker, job_id: str) -> PipelineOptions:
-    """Reconstruct PipelineOptions from the Job's stored config_json."""
+    """Reconstruct PipelineOptions from the Job's stored config_json.
+
+    Handles the admin-set ``model_path`` specially — it's persisted as a
+    string in config_json (JSON doesn't know Path) and ``model_used`` is a
+    display-only flag that must be stripped before unpacking into the
+    PipelineOptions dataclass.
+    """
     with session_factory() as session:
         job = session.get(Job, job_id)
         raw = job.config_json if job else None
     data = json.loads(raw) if raw else {}
-    return PipelineOptions(**data)
+    model_path_str = data.pop("model_path", None)
+    data.pop("model_used", None)
+    options = PipelineOptions(**data)
+    if model_path_str:
+        options.model_path = Path(model_path_str)
+    return options
 
 
 def run_api_pipeline(
