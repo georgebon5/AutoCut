@@ -18,11 +18,11 @@ interface UploadItem {
 }
 
 const PRESETS: { value: JobConfig["preset"]; label: string }[] = [
-  { value: "none", label: "None — full silence-removed cut" },
-  { value: "tight", label: "Tight — ~45s" },
-  { value: "medium", label: "Medium — ~90s" },
-  { value: "loose", label: "Loose — ~3 min" },
-  { value: "all", label: "All three (tight + medium + loose)" },
+  { value: "none", label: "Κανένα, όλο το κομμάτι χωρίς σιωπές" },
+  { value: "tight", label: "Σφιχτό, ~45s" },
+  { value: "medium", label: "Μέτριο, ~90s" },
+  { value: "loose", label: "Χαλαρό, ~3 λεπτά" },
+  { value: "all", label: "Και τα τρία (45s + 90s + 3 λεπτά)" },
 ];
 
 export default function UploadForm() {
@@ -114,7 +114,7 @@ export default function UploadForm() {
           onClick={() => inputRef.current?.click()}
           className="w-full rounded-lg border border-dashed border-gray-700 px-4 py-6 text-center text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
         >
-          Tap to pick videos
+          Πάτα για να διαλέξεις βίντεο
         </button>
       </div>
 
@@ -131,11 +131,11 @@ export default function UploadForm() {
         disabled={!canCreateJob}
       >
         <legend className="px-1 text-xs uppercase tracking-wide text-gray-400">
-          Pipeline options
+          Επιλογές
         </legend>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-gray-300">Preset</span>
+          <span className="text-gray-300">Διάρκεια</span>
           <select
             value={preset}
             onChange={(e) => setPreset(e.target.value as JobConfig["preset"])}
@@ -149,14 +149,18 @@ export default function UploadForm() {
           </select>
         </label>
 
-        <Checkbox label="Opening hook (top-scoring 1-3s teaser)" checked={hook} onChange={setHook} />
         <Checkbox
-          label={`Opening pacing${pacingDisabled ? " (requires a preset)" : ""}`}
+          label="Opening hook (το καλύτερο 1-3s στην αρχή σαν teaser)"
+          checked={hook}
+          onChange={setHook}
+        />
+        <Checkbox
+          label={`Γρήγορο ξεκίνημα${pacingDisabled ? " (θέλει διάρκεια)" : ""}`}
           checked={pacing && !pacingDisabled}
           disabled={pacingDisabled}
           onChange={setPacing}
         />
-        <Checkbox label="Punch-in zoom on highlights" checked={zoom} onChange={setZoom} />
+        <Checkbox label="Μικρό zoom στα highlights" checked={zoom} onChange={setZoom} />
       </fieldset>
 
       {jobError ? (
@@ -170,8 +174,8 @@ export default function UploadForm() {
         className="rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
       >
         {creatingJob
-          ? "Starting…"
-          : `Start job with ${completedIds.length} clip${completedIds.length === 1 ? "" : "s"}`}
+          ? "Ξεκινάει…"
+          : `Ξεκίνα με ${completedIds.length} clip${completedIds.length === 1 ? "" : "s"}`}
       </button>
     </section>
   );
@@ -233,10 +237,10 @@ function Checkbox({
 
 function labelFor(state: ItemState): string {
   switch (state) {
-    case "pending":   return "queued";
-    case "uploading": return "uploading…";
-    case "complete":  return "done";
-    case "failed":    return "failed";
+    case "pending":   return "αναμονή";
+    case "uploading": return "ανεβαίνει…";
+    case "complete":  return "έτοιμο";
+    case "failed":    return "απέτυχε";
   }
 }
 

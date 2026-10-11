@@ -22,10 +22,10 @@ export default function PreviewPlayer({ jobId, preset, cacheKey }: Props) {
   const videoName = pickVideo(outputsQ.data?.outputs ?? [], preset);
 
   if (outputsQ.isLoading) {
-    return <PlayerSkeleton label="Loading outputs…" />;
+    return <PlayerSkeleton label="Φόρτωση…" />;
   }
   if (!videoName) {
-    return <PlayerSkeleton label="No rendered video yet" />;
+    return <PlayerSkeleton label="Δεν υπάρχει βίντεο ακόμα" />;
   }
 
   // Cache-bust the download URL so the browser fetches the fresh render after
@@ -35,7 +35,7 @@ export default function PreviewPlayer({ jobId, preset, cacheKey }: Props) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
-        Preview · {videoName}
+        Προεπισκόπηση · {videoName}
       </h2>
       <video
         key={src}            /* force reload on cache-key change */

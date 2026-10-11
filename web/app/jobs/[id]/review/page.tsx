@@ -14,6 +14,19 @@ import type { Job, JobConfig } from "@/lib/api.types";
 
 const PRESET_OPTIONS: JobConfig["preset"][] = ["tight", "medium", "loose"];
 
+const PRESET_LABEL: Record<string, string> = {
+  tight: "Σφιχτό",
+  medium: "Μέτριο",
+  loose: "Χαλαρό",
+};
+
+const STATUS_LABEL: Record<"pending" | "running" | "done" | "failed", string> = {
+  pending: "αναμονή",
+  running: "τρέχει",
+  done: "έτοιμο",
+  failed: "απέτυχε",
+};
+
 function usePollWhileRunning(job: Job | undefined): number | false {
   return job && (job.status === "running" || job.status === "pending") ? 1_500 : false;
 }
@@ -56,11 +69,11 @@ export default function ReviewPage() {
             ← Jobs
           </Link>
           <h1 className="mt-1 truncate text-xl font-semibold tracking-tight">
-            Review · {jobId.slice(0, 8)}…
+            Έλεγχος · {jobId.slice(0, 8)}…
           </h1>
           {job ? (
             <p className="text-xs text-gray-500">
-              status {job.status} · stage {job.stage}
+              {STATUS_LABEL[job.status]} · {job.stage}
             </p>
           ) : null}
         </div>
@@ -83,14 +96,14 @@ export default function ReviewPage() {
 
       {job?.status !== "done" ? (
         <p className="text-sm text-gray-400">
-          Waiting for the job to finish before you can review.
+          Περιμένουμε να τελειώσει το job για να το δεις.
         </p>
       ) : isAll && preset === null ? (
         <p className="text-sm text-gray-400">
-          This job rendered three presets — pick one to review.
+          Αυτό το job έβγαλε τρεις διάρκειες. Διάλεξε μία για να δεις.
         </p>
       ) : edlQuery.isLoading ? (
-        <p className="text-sm text-gray-500">Loading EDL…</p>
+        <p className="text-sm text-gray-500">Φόρτωση EDL…</p>
       ) : edlQuery.isError ? (
         <p className="text-sm text-red-400">
           {(edlQuery.error as ApiError | Error).message}
@@ -141,7 +154,7 @@ function RerenderButton({
       disabled={disabled || busy}
       className="shrink-0 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-emerald-950 transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
     >
-      {busy ? "Rendering…" : "Re-render"}
+      {busy ? "Φτιάχνει βίντεο…" : "Ξαναφτιάξε βίντεο"}
     </button>
   );
 }
@@ -168,7 +181,7 @@ function PresetPicker({
                 : "bg-gray-800 text-gray-300 hover:bg-gray-700"
             }`}
           >
-            {p}
+            {PRESET_LABEL[p] ?? p}
           </button>
         );
       })}

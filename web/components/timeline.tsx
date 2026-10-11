@@ -68,7 +68,7 @@ export default function Timeline({ jobId, preset, edl }: Props) {
         <SegmentDetail index={selected!} seg={selectedSeg} />
       ) : (
         <p className="text-xs text-gray-500">
-          Tap a segment to toggle keep/cut and inspect its reasons.
+          Πάτα ένα κομμάτι για να το κρατήσεις ή να το κόψεις.
         </p>
       )}
     </section>
@@ -143,7 +143,7 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
     <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 text-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-gray-200">
-          Segment #{index} · {seg.clip_id}
+          Κομμάτι #{index} · {seg.clip_id}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-xs ${
@@ -152,11 +152,11 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
               : "bg-gray-700/50 text-gray-300"
           }`}
         >
-          {seg.decision} · {seg.decision_source}
+          {seg.decision === "keep" ? "μέσα" : "έξω"} · {seg.decision_source === "user" ? "εσύ" : "αυτόματο"}
         </span>
       </div>
       <div className="mt-2 text-xs text-gray-400">
-        {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s · score {seg.interest_score.toFixed(2)}
+        {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s · βαθμός {seg.interest_score.toFixed(2)}
       </div>
       {seg.reasons.length > 0 ? (
         <ul className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -186,12 +186,12 @@ function StatsBar({
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
       <span className="text-gray-200">
-        {stats.keep} keep · {stats.cut} cut
+        {stats.keep} μέσα · {stats.cut} έξω
       </span>
       <span>
-        {stats.keepSec.toFixed(1)}s of {totalSec.toFixed(1)}s ({pct}%)
+        {stats.keepSec.toFixed(1)}s από {totalSec.toFixed(1)}s ({pct}%)
       </span>
-      <span className="text-gray-500">· {total} segments total</span>
+      <span className="text-gray-500">· {total} κομμάτια σύνολο</span>
     </div>
   );
 }

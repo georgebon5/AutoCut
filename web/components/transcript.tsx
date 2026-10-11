@@ -75,7 +75,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   if (!hasAnyWords) {
     return (
       <p className="text-xs text-gray-500">
-        No transcript available for this cut.
+        Δεν υπάρχει κείμενο για αυτό το μοντάζ.
       </p>
     );
   }
@@ -83,7 +83,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
-        Transcript · tap any word to toggle its segment
+        Κείμενο · πάτα μία λέξη για να κόψεις/κρατήσεις το κομμάτι της
       </h2>
 
       <div className="flex max-h-80 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-800 bg-gray-950 p-4">

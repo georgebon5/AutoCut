@@ -32,7 +32,7 @@ export default function HomePage() {
         href="/upload"
         className="rounded-lg bg-emerald-500 px-4 py-3 text-center text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
       >
-        + Upload clips
+        + Ανέβασε clips
       </Link>
 
       <section>
@@ -40,10 +40,10 @@ export default function HomePage() {
           Jobs
         </h2>
         {jobs.isLoading ? (
-          <p className="text-sm text-gray-500">Loading…</p>
+          <p className="text-sm text-gray-500">Φόρτωση…</p>
         ) : jobs.isError ? (
           <p className="text-sm text-red-400">
-            Failed to load jobs. Is the API running?
+            Δεν φορτώθηκαν τα jobs. Τρέχει το API;
           </p>
         ) : jobs.data && jobs.data.length > 0 ? (
           <ul className="flex flex-col gap-3">
@@ -53,7 +53,7 @@ export default function HomePage() {
           </ul>
         ) : (
           <p className="text-sm text-gray-500">
-            No jobs yet. Tap “Upload clips” above to get started.
+            Κανένα job ακόμα. Πάτα “Ανέβασε clips” για να ξεκινήσεις.
           </p>
         )}
       </section>
@@ -69,7 +69,7 @@ function HealthBadge({ status, version }: { status?: string; version?: string })
         ok ? "bg-emerald-500/15 text-emerald-300" : "bg-gray-500/15 text-gray-400"
       }`}
     >
-      {ok ? `API v${version ?? "?"}` : "API offline"}
+      {ok ? `API v${version ?? "?"}` : "API εκτός"}
     </span>
   );
 }
@@ -115,6 +115,13 @@ function JobRow({ job }: { job: Job }) {
   return <li>{inner}</li>;
 }
 
+const STATUS_LABEL: Record<Job["status"], string> = {
+  pending: "αναμονή",
+  running: "τρέχει",
+  done: "έτοιμο",
+  failed: "απέτυχε",
+};
+
 function StatusChip({ status }: { status: Job["status"] }) {
   const colors: Record<Job["status"], string> = {
     pending: "bg-gray-500/15 text-gray-300",
@@ -124,7 +131,7 @@ function StatusChip({ status }: { status: Job["status"] }) {
   };
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs ${colors[status]}`}>
-      {status}
+      {STATUS_LABEL[status]}
     </span>
   );
 }

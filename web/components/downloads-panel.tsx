@@ -15,10 +15,10 @@ interface Props {
 
 
 const KIND_LABEL: Record<OutputFile["kind"], string> = {
-  video: "Video",
+  video: "Βίντεο",
   edl: "EDL (JSON)",
-  captions_srt: "Captions (SRT)",
-  captions_ass: "Captions (ASS)",
+  captions_srt: "Υπότιτλοι (SRT)",
+  captions_ass: "Υπότιτλοι (ASS)",
 };
 
 
@@ -34,15 +34,15 @@ export default function DownloadsPanel({ jobId, preset, cacheKey }: Props) {
   return (
     <section className="flex flex-col gap-4">
       <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
-        Downloads
+        Κατεβάσματα
       </h2>
 
       <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
         {outputsQ.isLoading ? (
-          <p className="text-sm text-gray-500">Loading outputs…</p>
+          <p className="text-sm text-gray-500">Φόρτωση…</p>
         ) : outputs.length === 0 ? (
           <p className="text-sm text-gray-500">
-            No rendered outputs yet. Hit “Re-render” above.
+            Δεν έχει βγει τίποτα ακόμα. Πάτα “Ξαναφτιάξε βίντεο” πιο πάνω.
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -77,18 +77,18 @@ function ExportBlock({ jobId, preset }: { jobId: string; preset: string | undefi
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
       <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-        Hand off to an editor
+        Για να το τελειώσεις στον editor σου
       </div>
       <p className="mb-3 text-xs text-gray-500">
-        FCPXML opens in Final Cut Pro, DaVinci Resolve, Premiere Pro and iMovie.
-        The timeline references the <strong>original</strong> footage, so you can
-        finish at full quality.
+        Το FCPXML ανοίγει σε Final Cut Pro, DaVinci Resolve, Premiere Pro και iMovie.
+        Το timeline δείχνει στο <strong>αρχικό</strong> βίντεο, άρα τελειώνεις
+        σε πλήρη ποιότητα.
       </p>
       <a
         href={href}
         className="inline-flex rounded-md bg-sky-500 px-3 py-2 text-sm font-semibold text-sky-950 transition hover:bg-sky-400"
       >
-        Export FCPXML
+        Κατέβασμα FCPXML
       </a>
     </div>
   );
@@ -109,7 +109,7 @@ function OutputRow({ file, href }: { file: OutputFile; href: string }) {
         download={file.name}
         className="shrink-0 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
       >
-        Download
+        Κατέβασμα
       </a>
     </li>
   );
