@@ -16,6 +16,10 @@ export interface JobConfig {
   hook: boolean;
   pacing: boolean;
   zoom: boolean;
+  // Server-side extras (admin may apply an AUTOCUT_API_MODEL_PATH); the
+  // flag is present only when the trained classifier scored this job.
+  model_used?: boolean;
+  model_path?: string;
 }
 
 export interface Job {

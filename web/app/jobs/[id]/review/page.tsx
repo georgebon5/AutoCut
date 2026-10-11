@@ -76,6 +76,11 @@ export default function ReviewPage() {
               {STATUS_LABEL[job.status]} · {job.stage}
             </p>
           ) : null}
+          {job?.config?.model_used ? (
+            <p className="mt-0.5 text-xs text-sky-400">
+              Σκοράρισμα από εκπαιδευμένο μοντέλο
+            </p>
+          ) : null}
           <Link
             href={`/jobs/${jobId}/overrides`}
             className="mt-1 inline-block text-xs text-sky-400 hover:text-sky-300"

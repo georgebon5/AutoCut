@@ -99,6 +99,7 @@ function JobRow({ job }: { job: Job }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {job.config?.model_used ? <MlBadge /> : null}
           <StatusChip status={job.status} />
           {canDelete ? (
             <DeleteButton
@@ -194,6 +195,17 @@ const STATUS_LABEL: Record<Job["status"], string> = {
   done: "έτοιμο",
   failed: "απέτυχε",
 };
+
+function MlBadge() {
+  return (
+    <span
+      title="Σκοράρισμα από εκπαιδευμένο μοντέλο"
+      className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-300"
+    >
+      ML
+    </span>
+  );
+}
 
 function StatusChip({ status }: { status: Job["status"] }) {
   const colors: Record<Job["status"], string> = {
