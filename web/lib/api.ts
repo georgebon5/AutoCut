@@ -139,3 +139,14 @@ export const postRender = (jobId: string, preset?: string) => {
   const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
   return request<Job>(`/jobs/${jobId}/render${q}`, { method: "POST" });
 };
+
+// ---------------------------------------------------------------------------
+// NLE export (FCPXML)
+// ---------------------------------------------------------------------------
+
+/** URL for an FCPXML download. Server sets Content-Disposition so the browser
+ *  saves it with a sensible filename. */
+export const exportFcpxmlUrl = (jobId: string, preset?: string) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return `${BASE}/jobs/${jobId}/export/fcpxml${q}`;
+};

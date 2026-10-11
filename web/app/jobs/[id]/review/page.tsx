@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
@@ -103,6 +104,11 @@ export default function ReviewPage() {
           />
           <Timeline jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
           <Transcript jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
+          <DownloadsPanel
+            jobId={jobId}
+            preset={edlPreset ?? undefined}
+            cacheKey={job.updated_at}
+          />
         </>
       ) : null}
     </main>
