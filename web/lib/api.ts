@@ -13,6 +13,7 @@ import type {
   Job,
   JobCreateRequest,
   OutputsListResponse,
+  OverridesListResponse,
   SegmentResponse,
   SegmentUpdate,
   Upload,
@@ -150,3 +151,10 @@ export const exportFcpxmlUrl = (jobId: string, preset?: string) => {
   const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
   return `${BASE}/jobs/${jobId}/export/fcpxml${q}`;
 };
+
+// ---------------------------------------------------------------------------
+// Override log (training data readback)
+// ---------------------------------------------------------------------------
+
+export const listOverrides = (jobId: string) =>
+  request<OverridesListResponse>(`/jobs/${jobId}/overrides`);

@@ -141,3 +141,22 @@ export interface OutputFile {
 export interface OutputsListResponse {
   outputs: OutputFile[];
 }
+
+export interface OverrideRecord {
+  id: number;
+  job_id: string;
+  preset: string;                 // "none" | "tight" | "medium" | "loose"
+  segment_index: number;
+  clip_id: string;
+  segment_start: number;
+  segment_end: number;
+  previous_decision: Decision;
+  new_decision: Decision;
+  interest_score: number;
+  features: Record<string, number>;
+  created_at: string;             // ISO 8601
+}
+
+export interface OverridesListResponse {
+  overrides: OverrideRecord[];
+}

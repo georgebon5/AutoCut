@@ -76,6 +76,12 @@ export default function ReviewPage() {
               {STATUS_LABEL[job.status]} · {job.stage}
             </p>
           ) : null}
+          <Link
+            href={`/jobs/${jobId}/overrides`}
+            className="mt-1 inline-block text-xs text-sky-400 hover:text-sky-300"
+          >
+            Οι αλλαγές μου →
+          </Link>
         </div>
         <RerenderButton
           busy={renderMut.isPending || job?.status === "running"}
