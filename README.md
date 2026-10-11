@@ -1,118 +1,105 @@
 # AutoCut
 
-AI rough-cut tool for Greek vertical vlog creators. Normalizes phone
-footage, removes silences and filler words, detects repeated takes,
-scores each segment, and renders a punchy first cut you can polish in
-your own editor.
+Built this for a friend who makes vertical vlogs on her phone and spends
+ages editing them. The idea isn't to replace her, just to hand her a strong
+first rough cut she can polish.
 
-Local-first: your footage never leaves your machine.
+What it does, basically: normalize the clips, cut silences and filler words
+("εε", "λοιπόν", etc.), spot repeated takes and keep the last one, score
+each remaining segment, pick enough to hit a target length, generate
+captions, render. Optional opening hook, optional subtle punch-in zoom on
+the good moments. Everything runs locally.
 
-## What it does
+It's not a one-click "AI editor". It's a rough-cut assistant. Her final
+timeline is still her job.
 
-- **Removes dead time** (silences > 0.5s, filler words, repeated takes)
-- **Scores segments** on prosody, motion, keyword hits, scene changes
-- **Fits a target duration** via `tight` (45s) / `medium` (90s) / `loose` (3min) presets
-- **Opening hook** — the top-scoring 1–3s moment prepended as a teaser
-- **Punch-in zoom** on emphasis moments (optional)
-- **Captions** in SRT + ASS (TikTok style preset: safe zone, karaoke highlight)
-- **FCPXML export** so you can finish the edit in Final Cut, DaVinci Resolve or Premiere
-- **Non-destructive**: outputs a decision list (EDL JSON) + a rendered MP4;
-  nothing you can't override
+## Running it
 
-## Requirements
-
-- Python 3.11+
-- ffmpeg + ffprobe (`brew install ffmpeg`)
-- Node 20+ and npm (for the web app only)
-
-## Install
+You need Python 3.11+, ffmpeg on PATH, and (for the web UI) Node 20+.
 
 ```bash
 pip install -e '.[dev]'
 ```
 
-## Three ways to use it
+### CLI
 
-### 1 — CLI (fastest)
+Simplest case, one clip:
 
 ```bash
-# One clip, default heuristic
 autocut ingest clip.mp4 --output-dir out/
+```
 
-# All three presets + hook + punch-in zoom
+Three preset lengths plus an opening hook:
+
+```bash
 autocut ingest *.mp4 --preset all --hook --zoom --output-dir out/
-
-# Score segments vs your final published edit
-autocut eval out/edl.json final.mp4 --verbose
-
-# Train a classifier that replaces the hand-tuned weights
-autocut train out1/edl.json final1.mp4 out2/edl.json final2.mp4 --out model.json
-autocut ingest new_clip.mp4 --model model.json --preset medium
 ```
 
-### 2 — HTTP API
+### Web app
+
+Two terminals. Backend:
 
 ```bash
 uvicorn autocut_api.main:app --reload
-# → http://127.0.0.1:8000/docs for interactive OpenAPI
 ```
 
-Chunked / resumable uploads, async job runner, EDL review, cached re-render,
-FCPXML export. See `ARCHITECTURE.md` for the full endpoint map.
-
-### 3 — Web app
+Frontend:
 
 ```bash
-# Backend
-uvicorn autocut_api.main:app --reload
-
-# Frontend (new terminal)
 cd web && npm install && npm run dev
-# → http://localhost:3000
 ```
 
-Upload clips → wait for the job → review timeline + transcript → toggle
-keep/cut → re-render (no re-analysis) → download MP4/SRT or export FCPXML.
-Works on a phone browser.
+Then open http://localhost:3000. You can upload clips from a phone browser
+too; the chunked upload resumes if you lose signal.
 
 ## Config
 
-Every threshold and weight lives in `config/default.yaml`. Point the CLI at
-your own file:
+Pretty much every threshold and weight is in `config/default.yaml`. Copy
+it, tweak it, point the CLI at it:
 
 ```bash
 autocut -c my_config.yaml ingest clip.mp4
 ```
 
-See `ARCHITECTURE.md` for the knobs that matter most.
-
-## Testing
+## Tests
 
 ```bash
-pytest                     # 571 tests, ~55s
-pytest -m slow             # real Silero + Whisper (model downloads)
-cd web && npm run build    # frontend typecheck + bundle
+pytest                 # ~55s on CPU
+cd web && npm run build
 ```
 
-## Deployment notes
+There are a couple of slow tests gated behind `-m slow` that actually
+download Silero + Whisper. Not run by default.
 
-- SQLite with WAL mode — single file at `autocut_data/autocut.db`
-- Thread pool runs 2 jobs in parallel by default; swap to Redis + RQ when
-  you grow past one tenant
-- Admin can drop a trained model at any path and set
-  `AUTOCUT_API_MODEL_PATH=/path/to/model.json` — every new job uses it
-  automatically
+## Learning loop (optional)
 
-## Deeper reading
+After you've used it on a few videos and have her final published cuts, you
+can score how well the heuristic did:
 
-**`ARCHITECTURE.md`** — module-by-module tour, API surface, design decisions
-(why OpenCV instead of PySceneDetect, why pure-numpy LR instead of LightGBM,
-why audio-correlation evaluation), environment quirks, known limitations.
+```bash
+autocut eval out1/edl.json her_final_cut.mp4 --verbose
+```
 
-## Non-goals
+And train a classifier on the logged features:
 
-- Virality / engagement prediction
-- Automatic music selection or beat sync
-- Color grading, transitions, stickers
+```bash
+autocut train out1/edl.json cut1.mp4 out2/edl.json cut2.mp4 --out model.json
+autocut ingest new_clip.mp4 --model model.json --preset medium
+```
 
-If you want any of those, use your NLE after exporting the FCPXML.
+If you're running the API, set `AUTOCUT_API_MODEL_PATH=/path/to/model.json`
+and every new job uses it. No code change, no restart of the frontend.
+
+## More detail
+
+`ARCHITECTURE.md` has the module map, the HTTP endpoints, and the "why
+did we do it this way" notes (why I ditched PySceneDetect, why the
+trainer is numpy and not LightGBM, how caching works, etc.).
+
+## What this doesn't try to do
+
+- Predict virality
+- Auto-pick music or beat-sync
+- Color, transitions, stickers
+
+For that stuff, export the FCPXML and finish in Final Cut / DaVinci / Premiere.
