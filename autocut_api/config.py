@@ -36,6 +36,18 @@ class ApiConfig(BaseSettings):
         return self.data_dir / "uploads"
 
     @property
+    def resolved_model_path(self) -> Path:
+        """Where to look for the active trained model.
+
+        Explicit ``model_path`` (env override) wins; otherwise we default to
+        ``data_dir/active_model.json`` so an uploaded model lives next to the
+        rest of the server state. The file may not exist; callers still check.
+        """
+        if self.model_path is not None:
+            return self.model_path
+        return self.data_dir / "active_model.json"
+
+    @property
     def resolved_database_url(self) -> str:
         if self.database_url:
             return self.database_url

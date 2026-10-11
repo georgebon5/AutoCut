@@ -96,11 +96,13 @@ def create_job(
         clip_paths.append(Path(up.final_path))
 
     options = _options_from_request(body)
-    # Apply the admin-set trained model (if any) to every job. It's set once
-    # by the operator via AUTOCUT_API_MODEL_PATH and benefits all uploads
-    # automatically — the client doesn't need to know it exists.
-    if cfg.model_path is not None and cfg.model_path.exists():
-        options.model_path = cfg.model_path
+    # Apply the admin-set trained model (if any) to every job. The model
+    # may come from AUTOCUT_API_MODEL_PATH (env) or a POST /models upload
+    # (persisted to data_dir/active_model.json); resolved_model_path hides
+    # that distinction from the caller.
+    resolved = cfg.resolved_model_path
+    if resolved.exists():
+        options.model_path = resolved
     try:
         validate_options(options)
     except PipelineError as e:
