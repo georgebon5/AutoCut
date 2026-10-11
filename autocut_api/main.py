@@ -19,7 +19,7 @@ from autocut_api.config import ApiConfig
 from autocut_api.database import Base, make_engine, make_session_factory
 from autocut_api.jobs import PipelineFn
 from autocut_api.pipeline_bridge import run_api_pipeline
-from autocut_api.routes import edl, health, jobs, outputs, overrides, render, uploads
+from autocut_api.routes import edl, export, health, jobs, outputs, overrides, render, uploads
 from autocut_api.runner import JobRunner
 
 
@@ -55,6 +55,7 @@ def create_app(
     app.include_router(outputs.router)
     app.include_router(render.router)
     app.include_router(overrides.router)
+    app.include_router(export.router)
     return app
 
 
