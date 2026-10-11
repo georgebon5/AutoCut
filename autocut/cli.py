@@ -11,6 +11,7 @@ from autocut.config import load_config
 from autocut.edl import load_edl
 from autocut.eval import EvalConfig, EvalError, evaluate_cut, extract_audio
 from autocut.pipeline import PipelineError, PipelineOptions, run_pipeline
+from autocut.trainer import collect_from_eval, train_and_evaluate
 
 
 class _ClickReporter:
@@ -158,3 +159,70 @@ def eval(
                 f"{s.index:>3}  {s.clip_id:<10}  {s.start:6.2f}  {s.end:6.2f}  "
                 f"{s.match_peak:5.2f}  {s.outcome}"
             )
+
+
+@cli.command()
+@click.argument("pairs", nargs=-1, required=True)
+@click.option("--out", "out_path", type=click.Path(path_type=Path),
+              default=Path("model.json"), show_default=True,
+              help="Where to save the trained LogisticModel.")
+@click.option("--test-fraction", type=float, default=0.25, show_default=True)
+@click.option("--seed", type=int, default=42, show_default=True)
+@click.option("--threshold", type=float, default=0.5, show_default=True,
+              help="Correlation peak needed to count a segment as kept.")
+def train(
+    pairs: tuple[str, ...],
+    out_path: Path,
+    test_fraction: float,
+    seed: int,
+    threshold: float,
+) -> None:
+    """Train a classifier from one or more (edl, published) pairs.
+
+    PAIRS: alternating edl.json published.mp4 edl.json published.mp4 …
+    Example:
+        autocut train run1/edl.json run1/final.mp4 run2/edl.json run2/final.mp4
+    """
+    import tempfile
+
+    if len(pairs) % 2 != 0:
+        raise click.ClickException(
+            "pass pairs of (edl.json, published.mp4) — got odd number of args"
+        )
+
+    examples = []
+    cfg = EvalConfig(match_threshold=threshold)
+    with tempfile.TemporaryDirectory() as td:
+        for i in range(0, len(pairs), 2):
+            edl_path = Path(pairs[i])
+            pub_path = Path(pairs[i + 1])
+            if not edl_path.exists() or not pub_path.exists():
+                raise click.ClickException(f"missing input: {edl_path} / {pub_path}")
+            click.echo(f"evaluating {edl_path.name} vs {pub_path.name}…")
+            edl = load_edl(edl_path)
+            wav = Path(td) / f"pub_{i}.wav"
+            try:
+                extract_audio(pub_path, wav, sr=cfg.sr)
+            except EvalError as e:
+                raise click.ClickException(str(e)) from e
+            result = evaluate_cut(edl, wav, cfg)
+            examples.extend(collect_from_eval(edl, result))
+
+    click.echo(f"\ncollected {len(examples)} labelled segments")
+    try:
+        tr = train_and_evaluate(
+            examples, test_fraction=test_fraction, seed=seed,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+
+    click.echo(
+        f"\nheld-out ({tr.n_test} segs):  "
+        f"heuristic F1 = {tr.heuristic_test_f1:.3f}  "
+        f"model F1 = {tr.model_test_f1:.3f}  "
+        f"{'✓ beats baseline' if tr.beats_baseline else '✗ worse than baseline'}"
+    )
+    click.echo(f"train F1 ({tr.n_train} segs): {tr.model_train_f1:.3f}")
+
+    tr.model.save(out_path)
+    click.echo(f"\nmodel saved to {out_path}")
