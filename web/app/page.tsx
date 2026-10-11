@@ -1,9 +1,10 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 
-import { getHealth, listJobs } from "@/lib/api";
+import { ApiError, deleteJob, getHealth, listJobs } from "@/lib/api";
 import type { Job } from "@/lib/api.types";
 
 /** Only running jobs need live polling; terminal jobs are checked less often. */
@@ -75,7 +76,17 @@ function HealthBadge({ status, version }: { status?: string; version?: string })
 }
 
 function JobRow({ job }: { job: Job }) {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+
+  const removeMut = useMutation({
+    mutationFn: () => deleteJob(job.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
   const pct = Math.round(job.progress * 100);
+  const canDelete = job.status === "done" || job.status === "failed";
+
   const inner = (
     <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 transition hover:border-gray-700">
       <div className="flex items-center justify-between gap-3">
@@ -87,7 +98,18 @@ function JobRow({ job }: { job: Job }) {
             {job.stage} · {new Date(job.created_at).toLocaleString()}
           </p>
         </div>
-        <StatusChip status={job.status} />
+        <div className="flex items-center gap-2">
+          <StatusChip status={job.status} />
+          {canDelete ? (
+            <DeleteButton
+              confirming={confirming}
+              busy={removeMut.isPending}
+              onFirstClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirming(true); }}
+              onConfirm={(e) => { e.preventDefault(); e.stopPropagation(); removeMut.mutate(); }}
+              onCancel={(e) => { e.preventDefault(); e.stopPropagation(); setConfirming(false); }}
+            />
+          ) : null}
+        </div>
       </div>
       <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
         <div
@@ -99,6 +121,11 @@ function JobRow({ job }: { job: Job }) {
       </div>
       {job.error ? (
         <p className="mt-2 text-xs text-red-400">{job.error}</p>
+      ) : null}
+      {removeMut.isError ? (
+        <p className="mt-2 text-xs text-red-400">
+          {(removeMut.error as ApiError | Error).message}
+        </p>
       ) : null}
     </div>
   );
@@ -113,6 +140,52 @@ function JobRow({ job }: { job: Job }) {
     );
   }
   return <li>{inner}</li>;
+}
+
+function DeleteButton({
+  confirming, busy, onFirstClick, onConfirm, onCancel,
+}: {
+  confirming: boolean;
+  busy: boolean;
+  onFirstClick: (e: React.MouseEvent) => void;
+  onConfirm: (e: React.MouseEvent) => void;
+  onCancel: (e: React.MouseEvent) => void;
+}) {
+  if (busy) {
+    return (
+      <span className="text-xs text-gray-400">Σβήνει…</span>
+    );
+  }
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={onFirstClick}
+        className="rounded-md border border-gray-700 px-2 py-0.5 text-xs text-gray-400 transition hover:border-red-500 hover:text-red-300"
+        aria-label="Delete job"
+      >
+        σβήσε
+      </button>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-xs">
+      <button
+        type="button"
+        onClick={onConfirm}
+        className="rounded-md bg-red-500 px-2 py-0.5 font-medium text-red-950 transition hover:bg-red-400"
+      >
+        σίγουρα;
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-md border border-gray-700 px-2 py-0.5 text-gray-400 transition hover:border-gray-500"
+      >
+        άκυρο
+      </button>
+    </span>
+  );
 }
 
 const STATUS_LABEL: Record<Job["status"], string> = {

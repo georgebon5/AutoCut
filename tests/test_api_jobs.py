@@ -308,3 +308,118 @@ def test_invalid_options_not_persisted(default_client):
     client.post("/jobs", json={"upload_ids": [uid], "preset": "ultra"})
     r = client.get("/jobs").json()
     assert r == []    # no jobs were persisted
+
+
+# ---------------------------------------------------------------------------
+# DELETE /jobs/{id}
+# ---------------------------------------------------------------------------
+
+def _seed_running_job(app) -> str:
+    """Insert a Job directly with status='running' (bypasses the normal
+    runner-driven lifecycle) so the delete endpoint can be exercised on
+    a definitely-active row."""
+    with app.state.session_factory() as session:
+        job = Job(status="running", stage="transcribing", progress=0.4)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job.id
+
+
+def test_delete_unknown_job_returns_404(default_client):
+    client, _ = default_client
+    r = client.delete("/jobs/does-not-exist")
+    assert r.status_code == 404
+
+
+def test_delete_running_job_returns_409(default_client):
+    client, _ = default_client
+    jid = _seed_running_job(client.app)
+    r = client.delete(f"/jobs/{jid}")
+    assert r.status_code == 409
+    # Row must still be there.
+    assert client.get(f"/jobs/{jid}").status_code == 200
+
+
+def test_delete_pending_job_returns_409(default_client):
+    client, _ = default_client
+    with client.app.state.session_factory() as session:
+        job = Job(status="pending", stage="created", progress=0.0)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        jid = job.id
+    r = client.delete(f"/jobs/{jid}")
+    assert r.status_code == 409
+
+
+def test_delete_done_job_returns_204_and_row_gone(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+    _wait_until(client, jid)
+
+    r = client.delete(f"/jobs/{jid}")
+    assert r.status_code == 204
+    assert client.get(f"/jobs/{jid}").status_code == 404
+
+
+def test_delete_removes_workspace_dir(default_client):
+    client, cfg = default_client
+    uid = _completed_upload(client)
+    jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+    _wait_until(client, jid)
+    workspace = cfg.jobs_dir / jid
+    # Workspace should exist first.
+    assert workspace.exists()
+
+    client.delete(f"/jobs/{jid}")
+    assert not workspace.exists()
+
+
+def test_delete_cascades_segment_overrides(default_client):
+    """Overrides for the deleted job must not linger — they'd pollute the
+    training export the next time a classifier is trained."""
+    from autocut_api.models import SegmentOverride
+    client, _ = default_client
+    uid = _completed_upload(client)
+    jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+    _wait_until(client, jid)
+
+    with client.app.state.session_factory() as session:
+        session.add(SegmentOverride(
+            job_id=jid, preset="none", segment_index=0, clip_id="c",
+            segment_start=0.0, segment_end=1.0,
+            previous_decision="keep", new_decision="cut",
+            interest_score=0.5, features_json="{}",
+        ))
+        session.commit()
+
+    client.delete(f"/jobs/{jid}")
+
+    with client.app.state.session_factory() as session:
+        remaining = session.query(SegmentOverride).filter_by(job_id=jid).all()
+        assert remaining == []
+
+
+def test_delete_failed_job_is_allowed(default_client):
+    """Failed jobs must be deletable so the user can clean up errors."""
+    client, _ = default_client
+    with client.app.state.session_factory() as session:
+        job = Job(status="failed", stage="error", progress=0.0,
+                  error="pipeline crashed")
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        jid = job.id
+    r = client.delete(f"/jobs/{jid}")
+    assert r.status_code == 204
+
+
+def test_delete_idempotent_second_call_is_404(default_client):
+    client, _ = default_client
+    uid = _completed_upload(client)
+    jid = client.post("/jobs", json={"upload_ids": [uid]}).json()["id"]
+    _wait_until(client, jid)
+    assert client.delete(f"/jobs/{jid}").status_code == 204
+    assert client.delete(f"/jobs/{jid}").status_code == 404

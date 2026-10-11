@@ -9,16 +9,17 @@ pipeline function (resolved from ``app.state``) to the thread pool.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import desc, select
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import delete as sa_delete, desc, select
 from sqlalchemy.orm import Session
 
 from autocut.pipeline import PipelineError, PipelineOptions, validate_options
 from autocut_api.config import ApiConfig
 from autocut_api.dependencies import get_config, get_db
-from autocut_api.models import Job, Upload
+from autocut_api.models import Job, SegmentOverride, Upload
 from autocut_api.schemas import JobCreateRequest, JobResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -138,3 +139,29 @@ def get_job(job_id: str, session: Session = Depends(get_db)) -> JobResponse:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return _job_response(job)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job(job_id: str, session: Session = Depends(get_db)) -> Response:
+    """Remove a finished job: workspace dir, Job row, and override log.
+
+    Only ``done`` / ``failed`` jobs can be deleted — killing a live render
+    half-way would leave orphan ffmpeg processes and partial output files.
+    """
+    job = session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status in ("pending", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot delete an active job (status={job.status})",
+        )
+
+    if job.workspace:
+        shutil.rmtree(job.workspace, ignore_errors=True)
+    session.execute(
+        sa_delete(SegmentOverride).where(SegmentOverride.job_id == job_id)
+    )
+    session.delete(job)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -98,6 +98,9 @@ export const createJob = (body: JobCreateRequest) =>
 
 export const getJob = (id: string) => request<Job>(`/jobs/${id}`);
 
+export const deleteJob = (id: string) =>
+  request<void>(`/jobs/${id}`, { method: "DELETE", expectJson: false });
+
 // ---------------------------------------------------------------------------
 // EDL review + segment override
 // ---------------------------------------------------------------------------
