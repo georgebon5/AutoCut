@@ -62,6 +62,11 @@ def cli(ctx: click.Context, config: Path | None) -> None:
               help="More aggressive cutting in each clip's opening window.")
 @click.option("--zoom", "zoom_opt", is_flag=True,
               help="Subtle punch-in zoom on high-score emphasis moments.")
+@click.option("--model", "model_path",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Use a trained LogisticModel (JSON) for scoring instead of "
+                   "the hand-tuned heuristic weights.")
 @click.pass_context
 def ingest(
     ctx: click.Context,
@@ -76,6 +81,7 @@ def ingest(
     hook_opt: bool,
     pacing_opt: bool,
     zoom_opt: bool,
+    model_path: Path | None,
 ) -> None:
     """Normalize clips, detect speech, transcribe, remove silences, render.
 
@@ -92,6 +98,7 @@ def ingest(
         pacing=pacing_opt,
         zoom=zoom_opt,
         preset=preset,
+        model_path=model_path,
     )
 
     click.echo(f"AutoCut — {len(clips)} clip(s) → {output_dir}")

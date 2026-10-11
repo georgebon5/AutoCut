@@ -29,7 +29,7 @@ from autocut.models import ProxyInfo, Segment, SpeechRegion, Transcript
 from autocut.motion import enrich_segments_motion
 from autocut.render import RenderError, render
 from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
-from autocut.scoring import score_segments
+from autocut.scoring import score_segments, score_segments_with_model
 from autocut.select import select_segments
 from autocut.silence import apply_silence_removal
 from autocut.takes import detect_repeated_takes
@@ -53,6 +53,9 @@ class PipelineOptions:
     zoom: bool = False
     # "none" → full silence-removed cut only; "all" → tight+medium+loose.
     preset: str = "none"
+    # Optional trained LogisticModel to replace the heuristic weights.
+    # When set, features must be enabled; validate_options enforces this.
+    model_path: Path | None = None
 
 
 @dataclass
@@ -115,6 +118,8 @@ def validate_options(options: PipelineOptions) -> None:
         raise PipelineError("pacing only applies with a preset (not 'none')")
     if options.zoom and not options.features:
         raise PipelineError("zoom requires features=True")
+    if options.model_path is not None and not options.features:
+        raise PipelineError("model_path requires features=True")
 
 
 def run_pipeline(
@@ -234,6 +239,17 @@ def run_pipeline(
     # ── 7. Features + scoring (optional) ─────────────────────────────────────
     if do_features:
         rep.stage("features", _STAGE_PROGRESS["features"])
+
+        # Load the trained model once if provided — reused across clips.
+        model = None
+        if options.model_path is not None:
+            from autocut.trainer import LogisticModel
+            model = LogisticModel.load(options.model_path)
+            rep.info(
+                f"scoring with model: {options.model_path.name} "
+                f"({len(model.feature_names)} features)"
+            )
+
         for proxy in proxies:
             segs = [s for s in all_segments if s.clip_id == proxy.clip_id]
             transcript = all_transcripts.get(proxy.clip_id)
@@ -242,7 +258,10 @@ def run_pipeline(
             enrich_segments_keywords(segs, transcript, cfg.keywords)
             boundaries = detect_scene_boundaries(proxy.proxy_path, cfg.scenes)
             enrich_segments_scenes(segs, {proxy.clip_id: boundaries}, cfg.scenes)
-            score_segments(segs, cfg.scoring)
+            if model is not None:
+                score_segments_with_model(segs, model)
+            else:
+                score_segments(segs, cfg.scoring)
             kept = [s for s in segs if s.decision == "keep"]
             avg = (sum(s.interest_score for s in kept) / len(kept)) if kept else 0.0
             rep.info(f"{proxy.clip_id}: {len(kept)} keep segment(s)  avg score {avg:.2f}")

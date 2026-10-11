@@ -139,6 +139,14 @@ def test_run_pipeline_rejects_zoom_without_features(tmp_path):
                      PipelineOptions(zoom=True, features=False))
 
 
+def test_run_pipeline_rejects_model_without_features(tmp_path):
+    model_path = tmp_path / "m.json"
+    model_path.write_text("{}")
+    with pytest.raises(PipelineError, match="features"):
+        run_pipeline([tmp_path / "x.mp4"], tmp_path / "out", load_config(),
+                     PipelineOptions(model_path=model_path, features=False))
+
+
 # ---------------------------------------------------------------------------
 # End-to-end with fake models (needs ffmpeg)
 # ---------------------------------------------------------------------------
@@ -198,3 +206,63 @@ def test_run_pipeline_broll_clip_info_message(tmp_path: Path, patched):
         reporter=cap,
     )
     assert any("B-roll" in msg for msg in cap.infos)
+
+
+# ---------------------------------------------------------------------------
+# Model-based scoring (--model path.json)
+# ---------------------------------------------------------------------------
+
+@skip_no_ffmpeg
+def test_run_pipeline_uses_model_when_path_set(
+    tmp_path: Path, patched, monkeypatch,
+):
+    """A LogisticModel on disk should replace the heuristic scorer."""
+    import numpy as np
+    from autocut.trainer import LogisticModel
+
+    model = LogisticModel(
+        feature_names=["rms_energy"],
+        weights=np.array([2.0]),
+        bias=0.0,
+        feature_mean=np.array([0.0]),
+        feature_std=np.array([1.0]),
+    )
+    model_path = tmp_path / "model.json"
+    model.save(model_path)
+
+    calls: list[dict] = []
+
+    def recording_predict_proba(self, features):
+        calls.append(dict(features))
+        return 0.42
+
+    monkeypatch.setattr(LogisticModel, "predict_proba", recording_predict_proba)
+
+    # The pipeline will call `enrich_segments` → it's monkey-patched to a no-op
+    # by the `patched` fixture, so segments carry empty features. That's fine
+    # for this test; we only care that the model is invoked.
+    clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
+    run_pipeline(
+        [clip], tmp_path / "out", load_config(),
+        PipelineOptions(model_path=model_path, captions=False),
+    )
+    assert len(calls) > 0, "LogisticModel.predict_proba was never called"
+
+
+@skip_no_ffmpeg
+def test_run_pipeline_falls_back_to_heuristic_when_no_model_path(
+    tmp_path: Path, patched, monkeypatch,
+):
+    """Without --model, LogisticModel should never be loaded."""
+    from autocut.trainer import LogisticModel
+
+    def boom(*_a, **_kw):
+        raise AssertionError("LogisticModel.load was called with no model_path")
+
+    monkeypatch.setattr(LogisticModel, "load", classmethod(lambda cls, p: boom()))
+
+    clip = make_clip(tmp_path / "clip.mp4", duration=6.0)
+    run_pipeline(
+        [clip], tmp_path / "out", load_config(),
+        PipelineOptions(captions=False),
+    )

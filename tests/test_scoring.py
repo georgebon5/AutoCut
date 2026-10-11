@@ -6,7 +6,7 @@ import pytest
 
 from autocut.config import ScoringConfig
 from autocut.models import Segment
-from autocut.scoring import _norm, score_segment, score_segments
+from autocut.scoring import _norm, score_segment, score_segments, score_segments_with_model
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +251,59 @@ def test_scoring_config_feature_max_covers_all_weights():
     cfg = ScoringConfig()
     for feature in cfg.weights:
         assert feature in cfg.feature_max, f"feature_max missing key: {feature}"
+
+
+# ---------------------------------------------------------------------------
+# score_segments_with_model — Phase-5 classifier backend
+# ---------------------------------------------------------------------------
+
+class _StubModel:
+    """Minimal stand-in for LogisticModel: returns a fixed scalar probability."""
+    def __init__(self, p: float = 0.75):
+        self._p = p
+        self.calls: list[dict[str, float]] = []
+        self.feature_names: list[str] = ["x"]
+
+    def predict_proba(self, features: dict[str, float]) -> float:
+        self.calls.append(features)
+        return self._p
+
+
+def test_model_scoring_sets_keep_segments_in_place():
+    seg = make_segment()
+    seg.features = {"x": 1.0}
+    model = _StubModel(p=0.42)
+    score_segments_with_model([seg], model)
+    assert seg.interest_score == pytest.approx(0.42)
+    assert model.calls == [{"x": 1.0}]
+
+
+def test_model_scoring_skips_cut_segments():
+    seg = make_segment(decision="cut")
+    seg.features = {"x": 1.0}
+    model = _StubModel(p=0.9)
+    score_segments_with_model([seg], model)
+    assert seg.interest_score == pytest.approx(0.0)   # untouched
+    assert model.calls == []
+
+
+def test_model_scoring_clamps_above_one():
+    seg = make_segment()
+    seg.features = {"x": 1.0}
+    score_segments_with_model([seg], _StubModel(p=1.5))
+    assert seg.interest_score == 1.0
+
+
+def test_model_scoring_clamps_below_zero():
+    seg = make_segment()
+    seg.features = {"x": 1.0}
+    score_segments_with_model([seg], _StubModel(p=-0.3))
+    assert seg.interest_score == 0.0
+
+
+def test_model_scoring_leaves_empty_features_consistent():
+    """A keep segment with no features should still get the model's prediction
+    (model will treat missing features as 0.0 — that's its concern)."""
+    seg = make_segment()
+    score_segments_with_model([seg], _StubModel(p=0.1))
+    assert seg.interest_score == pytest.approx(0.1)
