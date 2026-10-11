@@ -35,7 +35,23 @@ Three preset lengths plus an opening hook:
 autocut ingest *.mp4 --preset all --hook --zoom --output-dir out/
 ```
 
-### Web app
+### Web app (with Docker — easiest)
+
+If you have Docker installed, this is one command:
+
+```bash
+docker compose up --build
+```
+
+First build pulls Python + Node, grabs ffmpeg, and compiles the frontend;
+takes a few minutes. After that, open http://localhost:3000.
+
+Everything the app writes (SQLite, uploaded clips, proxies, rendered mp4s,
+plus the Silero/Whisper weights it downloads the first time it runs) lives
+in two Docker volumes: `autocut_data` and `autocut_cache`. Nothing hits
+your home directory.
+
+### Web app (without Docker)
 
 Two terminals. Backend:
 

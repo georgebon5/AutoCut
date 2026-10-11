@@ -1,0 +1,40 @@
+# VCS
+.git
+.gitignore
+
+# Python junk
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Local virtualenvs
+.venv
+venv
+
+# Runtime data (lives in the volume, not the image)
+autocut_data
+output
+*.mp4
+*.mov
+*.wav
+*.srt
+*.ass
+
+# Web — built in its own image
+web/node_modules
+web/.next
+web/out
+
+# IDE + OS
+.DS_Store
+.vscode
+.idea
+
+# Docs don't belong in the image
+ARCHITECTURE.md
+README.md

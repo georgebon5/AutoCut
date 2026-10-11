@@ -1,0 +1,50 @@
+# AutoCut — one-command local stack.
+#
+#   docker compose up --build
+#   open http://localhost:3000
+#
+# All persistent state lives in the two named volumes:
+#   autocut_data   — SQLite, uploaded clips, proxies, EDLs, rendered mp4s
+#   autocut_cache  — Whisper + Silero + torch weights downloaded on first run
+#
+# The web container is the only port we publish; the API stays on the
+# internal compose network and the Next.js server rewrites /api/* → api:8000.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AUTOCUT_API_DATA_DIR: /data
+      # Set AUTOCUT_API_MODEL_PATH here (e.g. /data/model.json) once you
+      # have a trained classifier you want every new job to use.
+    volumes:
+      - autocut_data:/data
+      - autocut_cache:/data/hf-cache
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        AUTOCUT_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  autocut_data:
+  autocut_cache:
