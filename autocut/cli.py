@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import click
 
 from autocut.config import load_config
+from autocut.edl import load_edl
+from autocut.eval import EvalConfig, EvalError, evaluate_cut, extract_audio
 from autocut.pipeline import PipelineError, PipelineOptions, run_pipeline
 
 
@@ -100,3 +103,58 @@ def ingest(
         raise click.ClickException(str(e)) from e
 
     click.echo(f"\nDone in {result.elapsed_s:.1f}s")
+
+
+@cli.command()
+@click.argument("edl_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("published", type=click.Path(exists=True, path_type=Path))
+@click.option("--threshold", type=float, default=0.5, show_default=True,
+              help="Correlation peak needed to count a segment as kept.")
+@click.option("--min-seg", type=float, default=0.3, show_default=True,
+              help="Segments shorter than this are skipped.")
+@click.option("--verbose", "-v", is_flag=True,
+              help="Print the per-segment outcome table.")
+def eval(
+    edl_path: Path,
+    published: Path,
+    threshold: float,
+    min_seg: float,
+    verbose: bool,
+) -> None:
+    """Score an EDL's auto decisions against a published cut.
+
+    EDL_PATH: edl.json produced by `autocut ingest`.
+    PUBLISHED: final edit (mp4/mov) the editor exported.
+    """
+    edl = load_edl(edl_path)
+    cfg = EvalConfig(match_threshold=threshold, min_segment_s=min_seg)
+    with tempfile.TemporaryDirectory() as td:
+        pub_wav = Path(td) / "published.wav"
+        try:
+            extract_audio(published, pub_wav, sr=cfg.sr)
+        except EvalError as e:
+            raise click.ClickException(str(e)) from e
+        result = evaluate_cut(edl, pub_wav, cfg)
+
+    click.echo(
+        f"TP={result.tp}  FP={result.fp}  TN={result.tn}  FN={result.fn}  "
+        f"(skipped {result.skipped})"
+    )
+    click.echo(
+        f"precision={result.precision:.3f}  "
+        f"recall={result.recall:.3f}  "
+        f"F1={result.f1:.3f}"
+    )
+    click.echo(
+        f"kept by pipeline: {result.kept_by_pipeline_s:.1f}s  ·  "
+        f"kept by editor: {result.kept_by_editor_s:.1f}s  ·  "
+        f"total: {result.total_segment_s:.1f}s"
+    )
+
+    if verbose:
+        click.echo("\nidx  clip        start    end     peak   outcome")
+        for s in result.segments:
+            click.echo(
+                f"{s.index:>3}  {s.clip_id:<10}  {s.start:6.2f}  {s.end:6.2f}  "
+                f"{s.match_peak:5.2f}  {s.outcome}"
+            )
