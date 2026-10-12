@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Pipeline library + HTTP API
+  # ---------------------------------------------------------------------
+  python:
+    name: Python (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: System packages for ffmpeg + opencv + soundfile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            libsndfile1 \
+            libgl1 \
+            libglib2.0-0
+
+      - name: Install CPU torch first (keeps the GPU wheel out of the resolver)
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+            "torch>=2.0" "torchaudio>=2.0"
+
+      - name: Install project with dev extras
+        run: pip install -e '.[dev]'
+
+      - name: Pin scipy for numpy 1.26 compatibility
+        # scipy >= 1.15 requires numpy >= 2; we're on 1.26 (torch dep),
+        # so stay on the 1.14.x line.
+        run: pip install 'scipy<1.15'
+
+      - name: Run pytest
+        # addopts in pyproject.toml already excludes the `slow` marker that
+        # downloads Silero + Whisper weights.
+        run: pytest
+
+  # ---------------------------------------------------------------------
+  # Next.js frontend
+  # ---------------------------------------------------------------------
+  web:
+    name: Web (typecheck + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

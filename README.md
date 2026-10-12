@@ -1,5 +1,7 @@
 # AutoCut
 
+[![CI](https://github.com/georgebon5/AutoCut/actions/workflows/ci.yml/badge.svg)](https://github.com/georgebon5/AutoCut/actions/workflows/ci.yml)
+
 Built this for a friend who makes vertical vlogs on her phone and spends
 ages editing them. The idea isn't to replace her, just to hand her a strong
 first rough cut she can polish.
