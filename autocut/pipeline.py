@@ -241,14 +241,25 @@ def run_pipeline(
         rep.stage("features", _STAGE_PROGRESS["features"])
 
         # Load the trained model once if provided — reused across clips.
+        # If the file exists but is corrupt / unloadable (truncated JSON,
+        # wrong schema, etc.) fall back to the heuristic rather than crashing
+        # the whole job with a cryptic error. The user sees an info line and
+        # the pipeline still produces a usable cut.
         model = None
         if options.model_path is not None:
             from autocut.trainer import LogisticModel
-            model = LogisticModel.load(options.model_path)
-            rep.info(
-                f"scoring with model: {options.model_path.name} "
-                f"({len(model.feature_names)} features)"
-            )
+            try:
+                model = LogisticModel.load(options.model_path)
+                rep.info(
+                    f"scoring with model: {options.model_path.name} "
+                    f"({len(model.feature_names)} features)"
+                )
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                rep.info(
+                    f"model {options.model_path.name} unreadable "
+                    f"({type(e).__name__}: {e}); using heuristic weights"
+                )
+                model = None
 
         for proxy in proxies:
             segs = [s for s in all_segments if s.clip_id == proxy.clip_id]

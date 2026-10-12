@@ -13,12 +13,15 @@ is assembled at ``{data_dir}/uploads/{id}/{filename}``.
 
 from __future__ import annotations
 
+import logging
 import math
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 
 from autocut_api.config import ApiConfig
 from autocut_api.dependencies import get_config, get_db
@@ -30,9 +33,46 @@ from autocut_api.schemas import (
     UploadResponse,
 )
 
+log = logging.getLogger("autocut_api.uploads")
+
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 _CHUNK_FILENAME = "{:04d}.bin"
+
+# How long a non-completed upload can sit idle before the startup cleaner
+# considers it abandoned and deletes its chunks + DB row.
+_ORPHAN_UPLOAD_TTL = timedelta(hours=2)
+
+
+def cleanup_orphan_uploads(
+    cfg: ApiConfig, session_factory: sessionmaker,
+    ttl: timedelta = _ORPHAN_UPLOAD_TTL,
+) -> int:
+    """Delete abandoned uploads whose last touch is older than ``ttl``.
+
+    An "abandoned" upload is one whose status is still ``pending`` or
+    ``uploading`` (never finalised with ``/complete``). The DB row is
+    removed and the chunk directory is wiped. Returns the count removed.
+
+    Intended to run once at app startup — short-lived server, so a periodic
+    task would be overkill.
+    """
+    # DB timestamps are naive-UTC by convention (see models._utcnow_naive).
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - ttl
+    with session_factory() as session:
+        stale = session.scalars(
+            select(Upload).where(
+                Upload.status.in_(("pending", "uploading")),
+                Upload.updated_at < cutoff,
+            )
+        ).all()
+        for up in stale:
+            shutil.rmtree(_upload_dir(cfg, up.id), ignore_errors=True)
+            session.delete(up)
+        if stale:
+            session.commit()
+            log.info("cleaned up %d orphan uploads", len(stale))
+    return len(stale)
 
 
 # ---------------------------------------------------------------------------

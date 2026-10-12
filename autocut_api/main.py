@@ -16,10 +16,11 @@ from fastapi import FastAPI
 
 from autocut_api import __version__
 from autocut_api.config import ApiConfig
-from autocut_api.database import Base, make_engine, make_session_factory
+from autocut_api.database import Base, make_engine, make_session_factory, reconcile_schema
 from autocut_api.jobs import PipelineFn
 from autocut_api.pipeline_bridge import run_api_pipeline
 from autocut_api.routes import edl, export, health, jobs, models, outputs, overrides, render, uploads
+from autocut_api.routes.uploads import cleanup_orphan_uploads
 from autocut_api.runner import JobRunner
 
 
@@ -33,7 +34,13 @@ def create_app(
 
     engine = make_engine(cfg.resolved_database_url)
     Base.metadata.create_all(engine)
+    # Pick up columns added since the DB was first created (e.g. config_json)
+    # so a stale DB doesn't silently truncate pipeline options.
+    reconcile_schema(engine, Base)
     session_factory = make_session_factory(engine)
+    # Wipe uploads that were started but never finalised so the uploads dir
+    # doesn't grow unbounded across restarts.
+    cleanup_orphan_uploads(cfg, session_factory)
     runner = JobRunner(max_workers=max_workers)
 
     @asynccontextmanager
