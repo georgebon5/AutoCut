@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from autocut.captions import write_captions
+from autocut.captions import write_cut_captions
 from autocut.config import AutoCutConfig
 from autocut.edl import EDL, save_edl
 from autocut.features import enrich_segments
@@ -291,10 +291,11 @@ def run_pipeline(
                 f"(score {hook_seg.interest_score:.2f})"
             )
 
-    # ── 9. Render + EDL (per preset) ─────────────────────────────────────────
+    # ── 9. Render + EDL (+ cut-aligned captions) per preset ──────────────────
     rep.stage("rendering", _STAGE_PROGRESS["rendering"])
     outputs: list[Path] = []
     edls: list[Path] = []
+    caption_paths: list[Path] = []
     if options.preset == "all":
         presets_to_render = list(cfg.presets.targets.keys())
     elif options.preset == "none":
@@ -302,7 +303,11 @@ def run_pipeline(
     else:
         presets_to_render = [options.preset]
 
-    def _render_pass(segs: list[Segment], video_name: str, edl_name: str) -> None:
+    clip_order = {p.clip_id: i for i, p in enumerate(proxies)}
+
+    def _render_pass(segs: list[Segment], stem: str) -> None:
+        video_name = f"{stem}.mp4"
+        edl_name = f"edl{stem.removeprefix('rough_cut')}.json"
         try:
             out_mp4 = render(
                 proxies, segs, output_dir, cfg.render,
@@ -322,28 +327,28 @@ def run_pipeline(
         edls.append(edl_path)
         rep.info(f"wrote {edl_path.name}")
 
+        # Cut-aligned captions: timestamps match the mp4 we just produced,
+        # so the user can burn them in or import into an NLE without drift.
+        if do_captions and any(t.words for t in all_transcripts.values()):
+            written = write_cut_captions(
+                edl, cfg.captions, output_dir, stem=stem, clip_order=clip_order,
+            )
+            for fmt, path in written.items():
+                caption_paths.append(path)
+                rep.info(f"wrote {path.name}")
+
     if not presets_to_render:
-        _render_pass(all_segments, "rough_cut.mp4", "edl.json")
+        _render_pass(all_segments, "rough_cut")
     else:
         for p in presets_to_render:
             segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
             kept = sum(s.duration for s in segs if s.decision == "keep")
             target = cfg.presets.targets[p]
             rep.info(f"preset={p}: target {target:.0f}s, selected {kept:.0f}s")
-            _render_pass(segs, f"rough_cut_{p}.mp4", f"edl_{p}.json")
+            _render_pass(segs, f"rough_cut_{p}")
 
-    # ── 10. Captions (optional) ──────────────────────────────────────────────
-    caption_paths: list[Path] = []
     if do_captions:
         rep.stage("captions", _STAGE_PROGRESS["captions"])
-        for proxy in proxies:
-            transcript = all_transcripts.get(proxy.clip_id)
-            if transcript is None or not transcript.words:
-                continue
-            written = write_captions(transcript, cfg.captions, output_dir, proxy.clip_id)
-            for fmt, path in written.items():
-                caption_paths.append(path)
-                rep.info(f"{proxy.clip_id} [{fmt}] → {path.name}")
 
     return PipelineResult(
         proxies=proxies,

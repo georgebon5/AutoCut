@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from autocut.config import CaptionConfig
-from autocut.models import Transcript, WordTimestamp
+from autocut.models import EDL, Segment, Transcript, WordTimestamp
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +154,86 @@ def _build_ass(groups: list[list[WordTimestamp]], style: str = "tiktok") -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def _remap_words_to_output(
+    edl: EDL, clip_order: dict[str, int],
+) -> list[WordTimestamp]:
+    """Walk the final cut in render order and remap each word's timestamps to
+    the output timeline.
+
+    Mirrors render.py's ordering exactly: hook first (if present), then keep
+    segments sorted by (clip_order, segment.start). Each word's new timestamps
+    are measured from the start of the rendered mp4, so an SRT built from this
+    aligns frame-for-frame with the video.
+    """
+    ordered: list[Segment] = []
+    if edl.hook is not None:
+        ordered.append(edl.hook)
+    kept = [s for s in edl.segments if s.decision == "keep" and s.end > s.start]
+    kept.sort(key=lambda s: (clip_order.get(s.clip_id, 0), s.start))
+    ordered.extend(kept)
+
+    transcripts_by_clip = {t.clip_id: t for t in edl.transcripts}
+
+    out: list[WordTimestamp] = []
+    cumulative = 0.0
+    for seg in ordered:
+        t = transcripts_by_clip.get(seg.clip_id)
+        if t is None:
+            cumulative += seg.end - seg.start
+            continue
+        for w in t.words:
+            # Half-open: a word starting exactly at seg.end belongs to the
+            # NEXT segment (if any). Keeps boundary words from being counted
+            # twice or appearing in a cut-adjacent segment.
+            if seg.start <= w.start < seg.end:
+                # Clamp word.end to seg.end so a word straddling the cut
+                # doesn't produce a caption that stretches past the output.
+                w_end = min(w.end, seg.end)
+                out.append(WordTimestamp(
+                    word=w.word,
+                    start=cumulative + (w.start - seg.start),
+                    end=cumulative + (w_end - seg.start),
+                    probability=w.probability,
+                    clip_id=w.clip_id,
+                ))
+        cumulative += seg.end - seg.start
+    return out
+
+
+def write_cut_captions(
+    edl: EDL,
+    cfg: CaptionConfig,
+    output_dir: Path,
+    stem: str,
+    clip_order: dict[str, int],
+) -> dict[str, Path]:
+    """Write captions whose timestamps match the rendered rough cut.
+
+    Unlike ``write_captions`` (which uses raw-clip timestamps), this walks the
+    EDL in render order and emits a single SRT/ASS pair for the whole output,
+    accumulating per-segment offsets. The result stays in sync when the user
+    burns it onto the mp4 or imports both into an NLE.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    remapped = _remap_words_to_output(edl, clip_order)
+    groups = _group_words(
+        remapped,
+        max_words=cfg.max_words,
+        max_duration_s=cfg.max_duration_s,
+        min_gap_s=cfg.min_gap_s,
+    )
+    written: dict[str, Path] = {}
+    if "srt" in cfg.formats:
+        srt_path = output_dir / f"{stem}.srt"
+        srt_path.write_text(_build_srt(groups), encoding="utf-8")
+        written["srt"] = srt_path
+    if "ass" in cfg.formats:
+        ass_path = output_dir / f"{stem}.ass"
+        ass_path.write_text(_build_ass(groups, style=cfg.style), encoding="utf-8")
+        written["ass"] = ass_path
+    return written
+
 
 def write_captions(
     transcript: Transcript,

@@ -344,3 +344,174 @@ def test_write_only_srt_no_ass_key(tmp_path):
     cfg = default_cfg(formats=["srt"])
     written = write_captions(t, cfg, tmp_path, "c")
     assert "ass" not in written
+
+
+# ---------------------------------------------------------------------------
+# write_cut_captions — timestamps match the rendered output, not the source
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+from autocut.captions import _remap_words_to_output, write_cut_captions
+from autocut.models import EDL, ProxyInfo, Segment
+
+
+def _proxy(clip_id: str, duration: float = 10.0) -> ProxyInfo:
+    return ProxyInfo(
+        clip_id=clip_id,
+        original_path=Path(f"/{clip_id}.mp4"),
+        proxy_path=Path(f"/{clip_id}_proxy.mp4"),
+        audio_path=Path(f"/{clip_id}.wav"),
+        duration=duration, fps=30.0, width=1920, height=1080,
+    )
+
+
+def _seg(clip_id: str, start: float, end: float, decision: str = "keep") -> Segment:
+    return Segment(clip_id=clip_id, start=start, end=end, decision=decision)
+
+
+def test_remap_cut_segment_words_are_dropped():
+    """Words that live inside a cut segment must not appear in the output."""
+    transcript = make_transcript(
+        make_word("κρατήθηκε", 0.5, 1.0),
+        make_word("κόπηκε", 5.5, 6.0),  # falls in cut segment
+    )
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[
+            _seg("c", 0.0, 2.0, "keep"),
+            _seg("c", 5.0, 7.0, "cut"),
+        ],
+        transcripts=[transcript],
+    )
+    out = _remap_words_to_output(edl, clip_order={"c": 0})
+    assert [w.word for w in out] == ["κρατήθηκε"]
+
+
+def test_remap_preserves_first_segment_timing():
+    """A word at raw t=0.5s in the first kept segment stays at output t=0.5s."""
+    t = make_transcript(make_word("γεια", 0.5, 0.8))
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[_seg("c", 0.0, 2.0, "keep")],
+        transcripts=[t],
+    )
+    out = _remap_words_to_output(edl, clip_order={"c": 0})
+    assert out[0].start == pytest.approx(0.5)
+    assert out[0].end == pytest.approx(0.8)
+
+
+def test_remap_shifts_words_after_cut():
+    """After a cut, subsequent kept words shift forward by the cumulative duration."""
+    transcript = make_transcript(
+        make_word("ένα", 0.1, 0.4),       # kept, output 0.1
+        make_word("κόπηκε", 1.0, 1.3),    # cut
+        make_word("δύο", 3.5, 3.9),       # kept, output 1.5
+    )
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[
+            _seg("c", 0.0, 1.0, "keep"),  # output [0, 1]
+            _seg("c", 1.0, 3.0, "cut"),   # dropped
+            _seg("c", 3.0, 5.0, "keep"),  # output [1, 3]
+        ],
+        transcripts=[transcript],
+    )
+    out = _remap_words_to_output(edl, clip_order={"c": 0})
+    assert [w.word for w in out] == ["ένα", "δύο"]
+    assert out[0].start == pytest.approx(0.1)
+    assert out[1].start == pytest.approx(1.0 + (3.5 - 3.0))
+    assert out[1].end == pytest.approx(1.0 + (3.9 - 3.0))
+
+
+def test_remap_multi_clip_accumulates_offset_across_clips():
+    """Clip B's words should land after clip A's kept duration in the output."""
+    t_a = Transcript(clip_id="a", language="el", words=[
+        WordTimestamp(word="alpha", start=0.1, end=0.5, probability=0.9, clip_id="a"),
+    ])
+    t_b = Transcript(clip_id="b", language="el", words=[
+        WordTimestamp(word="beta", start=0.2, end=0.6, probability=0.9, clip_id="b"),
+    ])
+    edl = EDL(
+        clips=[_proxy("a", duration=2.0), _proxy("b", duration=2.0)],
+        segments=[
+            _seg("a", 0.0, 2.0, "keep"),  # output [0, 2]
+            _seg("b", 0.0, 2.0, "keep"),  # output [2, 4]
+        ],
+        transcripts=[t_a, t_b],
+    )
+    out = _remap_words_to_output(edl, clip_order={"a": 0, "b": 1})
+    assert [w.word for w in out] == ["alpha", "beta"]
+    assert out[0].start == pytest.approx(0.1)
+    assert out[1].start == pytest.approx(2.0 + 0.2)
+
+
+def test_remap_puts_hook_words_first():
+    """The hook plays before chronological keeps, so its words start at t=0."""
+    hook = _seg("c", 10.0, 12.0, "keep")   # hook is a slice around 10-12s
+    transcript = make_transcript(
+        make_word("ξεκίνημα", 0.5, 1.0),    # in first keep (not the hook)
+        make_word("κορυφή", 10.5, 10.9),    # in hook
+    )
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[_seg("c", 0.0, 2.0, "keep")],
+        transcripts=[transcript],
+        hook=hook,
+    )
+    out = _remap_words_to_output(edl, clip_order={"c": 0})
+    assert [w.word for w in out] == ["κορυφή", "ξεκίνημα"]
+    # Hook word was at raw 10.5s inside hook starting at 10.0 → output 0.5s.
+    assert out[0].start == pytest.approx(0.5)
+    # First body keep starts at output = hook.duration = 2.0.
+    assert out[1].start == pytest.approx(2.0 + 0.5)
+
+
+def test_remap_clamps_word_end_to_segment_end():
+    """A word that leaks past the cut must have its end trimmed, not stretched."""
+    t = make_transcript(make_word("μισό", 1.8, 2.5))   # end leaks past seg.end=2.0
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[_seg("c", 0.0, 2.0, "keep")],
+        transcripts=[t],
+    )
+    out = _remap_words_to_output(edl, clip_order={"c": 0})
+    assert out[0].start == pytest.approx(1.8)
+    assert out[0].end == pytest.approx(2.0)   # clamped
+
+
+def test_write_cut_captions_produces_srt_matching_output(tmp_path):
+    """End-to-end: SRT timestamps in the file must reflect the output timeline."""
+    transcript = make_transcript(
+        make_word("ένα", 0.5, 1.0),
+        make_word("δύο", 3.5, 4.0),  # after a cut
+    )
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[
+            _seg("c", 0.0, 2.0, "keep"),
+            _seg("c", 2.0, 3.0, "cut"),
+            _seg("c", 3.0, 5.0, "keep"),
+        ],
+        transcripts=[transcript],
+    )
+    cfg = default_cfg(formats=["srt"])
+    written = write_cut_captions(
+        edl, cfg, tmp_path, stem="rough_cut", clip_order={"c": 0},
+    )
+    body = written["srt"].read_text(encoding="utf-8")
+    # "δύο" was at raw 3.5s; cut dropped [2,3], so output = 2.0 + 0.5 = 2.5s.
+    assert "00:00:02,500" in body
+
+
+def test_write_cut_captions_empty_transcript_produces_no_cues(tmp_path):
+    edl = EDL(
+        clips=[_proxy("c")],
+        segments=[_seg("c", 0.0, 2.0, "keep")],
+        transcripts=[Transcript(clip_id="c", language="el", words=[])],
+    )
+    cfg = default_cfg(formats=["srt"])
+    written = write_cut_captions(
+        edl, cfg, tmp_path, stem="rough_cut", clip_order={"c": 0},
+    )
+    assert written["srt"].read_text(encoding="utf-8") == ""
