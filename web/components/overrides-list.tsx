@@ -47,7 +47,12 @@ export default function OverridesList({ jobId }: { jobId: string }) {
 
   return (
     <section className="flex flex-col gap-4">
-      <SummaryBar flips={summary.flips} kept={summary.kept} cut={summary.cut} />
+      <SummaryBar
+        flips={summary.flips}
+        touchedSegments={summary.touchedSegments}
+        kept={summary.kept}
+        cut={summary.cut}
+      />
 
       <ul className="flex flex-col gap-2">
         {rows.map((r) => (
@@ -120,13 +125,26 @@ function DecisionChip({
 
 
 function SummaryBar({
-  flips, kept, cut,
-}: { flips: number; kept: number; cut: number }) {
+  flips, touchedSegments, kept, cut,
+}: { flips: number; touchedSegments: number; kept: number; cut: number }) {
+  // Two separate thoughts: how much the user clicked (flips) and what the
+  // final state looks like (kept/cut). Mixing them produced the "5 total,
+  // 0 kept, 1 cut" confusion where the numbers didn't add up.
+  const segWord = touchedSegments === 1 ? "κομμάτι" : "κομμάτια";
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-      <span className="text-gray-200">{flips} αλλαγές</span>
-      <span>· {kept} μπήκαν μέσα</span>
-      <span>· {cut} κόπηκαν</span>
+    <div className="flex flex-col gap-1 text-xs text-gray-400">
+      <div>
+        <span className="text-gray-200">
+          {flips} tap{flips === 1 ? "" : "s"}
+        </span>{" "}
+        σε {touchedSegments} {segWord}
+      </div>
+      <div>
+        <span className="text-gray-500">Τελικά:</span>{" "}
+        <span className="text-emerald-300">{kept} μέσα</span>
+        {" · "}
+        <span className="text-gray-300">{cut} έξω</span>
+      </div>
     </div>
   );
 }
@@ -134,7 +152,9 @@ function SummaryBar({
 
 function summarise(rows: OverrideRecord[]) {
   // The LAST row per segment is what currently applies — history before that
-  // is editing noise. We summarise the final state across segments.
+  // is editing noise. We summarise the final state across segments; the raw
+  // flip count stays visible as its own line so the user can see "I tapped
+  // the same thing 5 times" alongside "the end result is 1 cut segment".
   const final = new Map<string, Decision>();
   for (const r of rows) {
     final.set(`${r.preset}:${r.segment_index}`, r.new_decision);
@@ -145,5 +165,10 @@ function summarise(rows: OverrideRecord[]) {
     if (d === "keep") kept += 1;
     else cut += 1;
   }
-  return { flips: rows.length, kept, cut };
+  return {
+    flips: rows.length,
+    touchedSegments: final.size,
+    kept,
+    cut,
+  };
 }
