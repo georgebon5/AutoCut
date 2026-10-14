@@ -16,7 +16,9 @@ from fastapi import FastAPI
 
 from autocut_api import __version__
 from autocut_api.config import ApiConfig
-from autocut_api.database import Base, make_engine, make_session_factory, reconcile_schema
+from autocut_api.database import (
+    Base, fail_orphan_jobs, make_engine, make_session_factory, reconcile_schema,
+)
 from autocut_api.jobs import PipelineFn
 from autocut_api.pipeline_bridge import run_api_pipeline
 from autocut_api.routes import edl, export, health, jobs, models, outputs, overrides, render, uploads
@@ -38,6 +40,9 @@ def create_app(
     # so a stale DB doesn't silently truncate pipeline options.
     reconcile_schema(engine, Base)
     session_factory = make_session_factory(engine)
+    # Any job still ``running`` after a restart has lost its worker thread —
+    # the runner lives in-process. Mark them failed so the UI stops spinning.
+    fail_orphan_jobs(session_factory)
     # Wipe uploads that were started but never finalised so the uploads dir
     # doesn't grow unbounded across restarts.
     cleanup_orphan_uploads(cfg, session_factory)

@@ -44,6 +44,35 @@ def make_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
+def fail_orphan_jobs(session_factory: sessionmaker) -> int:
+    """Mark jobs still ``pending``/``running`` at startup as failed.
+
+    The runner is a ThreadPoolExecutor inside the server process; a restart
+    kills any in-flight threads but the DB rows stay at ``running`` forever,
+    leading to the UI showing a progress bar that never finishes. Called
+    once at app startup to clean those up — the user sees a clear error
+    instead of a stuck job.
+    """
+    # Imported lazily to avoid a circular dependency with the models module.
+    from autocut_api.models import Job
+
+    with session_factory() as session:
+        stale = session.query(Job).filter(
+            Job.status.in_(("pending", "running"))
+        ).all()
+        for job in stale:
+            job.status = "failed"
+            job.stage = "error"
+            job.error = (
+                "server restarted while this job was running; "
+                "re-create the job to try again"
+            )
+        if stale:
+            session.commit()
+            log.warning("marked %d orphan job(s) as failed on startup", len(stale))
+    return len(stale)
+
+
 def reconcile_schema(engine: Engine, base: type[DeclarativeBase]) -> None:
     """Add columns declared in the ORM but missing from the live DB.
 
