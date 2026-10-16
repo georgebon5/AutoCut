@@ -90,17 +90,29 @@ def _build_render_cmd(
     video_idx: list[int] = []   # ffmpeg input index for video of segment i
     audio_idx: list[Optional[int]] = []  # …for audio (None → use aevalsrc)
 
-    fi = 0  # running ffmpeg input index
+    # Pre-input `-ss` + `-t` has the decoder seek to the nearest keyframe
+    # and only read the segment's duration — orders of magnitude cheaper than
+    # feeding the whole proxy through a `trim` filter. `-accurate_seek` keeps
+    # it frame-accurate on seekable containers (mp4/wav here). `setpts` after
+    # decoding still zeros each segment's PTS so concat behaves identically.
+    fi = 0
     for rs in kept:
-        # Resolve to absolute: when we pass cwd= to ffmpeg (needed so the
-        # subtitles filter can take just a filename), any relative input
-        # paths would otherwise be resolved against the wrong directory.
-        cmd += ["-i", str(rs.video_path.resolve())]
+        cmd += [
+            "-accurate_seek",
+            "-ss", f"{rs.start:.6f}",
+            "-t", f"{rs.duration:.6f}",
+            "-i", str(rs.video_path.resolve()),
+        ]
         video_idx.append(fi)
         fi += 1
 
         if rs.audio_path is not None:
-            cmd += ["-i", str(rs.audio_path.resolve())]
+            cmd += [
+                "-accurate_seek",
+                "-ss", f"{rs.start:.6f}",
+                "-t", f"{rs.duration:.6f}",
+                "-i", str(rs.audio_path.resolve()),
+            ]
             audio_idx.append(fi)
             fi += 1
         else:
@@ -112,18 +124,14 @@ def _build_render_cmd(
         vi = video_idx[i]
         ai = audio_idx[i]
 
-        video_chain = (
-            f"[{vi}:v]trim=start={rs.start:.6f}:end={rs.end:.6f},"
-            f"setpts=PTS-STARTPTS"
-        )
+        video_chain = f"[{vi}:v]setpts=PTS-STARTPTS"
         if rs.has_zoom:
             video_chain += "," + _zoom_filter(rs)
         filters.append(f"{video_chain}[v{i}]")
 
         if ai is not None:
             filters.append(
-                f"[{ai}:a]atrim=start={rs.start:.6f}:end={rs.end:.6f},"
-                f"asetpts=PTS-STARTPTS[a{i}]"
+                f"[{ai}:a]asetpts=PTS-STARTPTS[a{i}]"
             )
         else:
             filters.append(
@@ -164,9 +172,14 @@ def _build_render_cmd(
     # final export is driven by FCPXML into the NLE anyway, so the preview
     # mp4 doesn't need archival quality.
     if fast_preview and _supports_videotoolbox():
+        # `-prio_speed 1` tells VideoToolbox to favour speed over quality,
+        # `-allow_sw 0` keeps us on the HW path (no software fallback), and a
+        # slightly lower bitrate (4M vs 6M) is fine for scrubbing preview.
         video_codec_args = [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "6M",
+            "-b:v", "4M",
+            "-prio_speed", "1",
+            "-allow_sw", "0",
             "-realtime", "1",
         ]
     else:

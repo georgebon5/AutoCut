@@ -88,8 +88,12 @@ def test_cmd_single_segment_no_concat_filter():
     fc = cmd[cmd.index("-filter_complex") + 1]
     assert "concat" not in fc
     assert "acrossfade" not in fc
-    assert "trim=start=1" in fc
-    assert "atrim=start=1" in fc
+    # Seeking happens at the input stage now (`-ss` before `-i`) rather than
+    # via a trim filter — so the filter graph only resets PTS, and the start
+    # offset shows up as a -ss arg instead.
+    assert "-ss" in cmd
+    ss_vals = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-ss"]
+    assert any(v.startswith("1.") for v in ss_vals)
 
 
 def test_cmd_single_segment_maps_v0_a0():
