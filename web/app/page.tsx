@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { ApiError, deleteJob, getHealth, listJobs } from "@/lib/api";
+import { ApiError, deleteJob, listJobs } from "@/lib/api";
 import type { Job } from "@/lib/api.types";
 
 /** Only running jobs need live polling; terminal jobs are checked less often. */
@@ -15,7 +15,6 @@ function usePollingInterval(jobs: Job[] | undefined): number | false {
 }
 
 export default function HomePage() {
-  const health = useQuery({ queryKey: ["health"], queryFn: getHealth });
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: listJobs,
@@ -24,16 +23,10 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 px-4 py-14">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="bg-gradient-to-br from-white to-white/60 bg-clip-text text-3xl font-light tracking-tight text-transparent">
-            AutoCut
-          </h1>
-          <p className="mt-1 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
-            Rough-cut studio
-          </p>
-        </div>
-        <HealthBadge status={health.data?.status} version={health.data?.version} />
+      <header>
+        <h1 className="bg-gradient-to-br from-white to-white/60 bg-clip-text text-3xl font-light tracking-tight text-transparent">
+          AutoCut
+        </h1>
       </header>
 
       <Link
@@ -66,26 +59,6 @@ export default function HomePage() {
         )}
       </section>
     </main>
-  );
-}
-
-function HealthBadge({ status, version }: { status?: string; version?: string }) {
-  const ok = status === "ok";
-  return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium tracking-wide ${
-        ok
-          ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-200/90"
-          : "border-white/10 bg-white/5 text-white/40"
-      }`}
-    >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${
-          ok ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-white/30"
-        }`}
-      />
-      {ok ? `API v${version ?? "?"}` : "API εκτός"}
-    </span>
   );
 }
 

@@ -108,11 +108,21 @@ function VideoWithSpaceToggle({
           t.tagName === "INPUT"
           || t.tagName === "TEXTAREA"
           || t.tagName === "SELECT"
+          || t.tagName === "BUTTON"
+          || t.tagName === "A"
           || t.isContentEditable
         )
       ) return;
       const v = videoRef.current;
       if (!v) return;
+      // Guard: don't play if the user isn't actually looking at this page.
+      // bfcache / background tabs / scrolled-away previews would otherwise
+      // start audio out of nowhere when the user hits Space elsewhere.
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (typeof document !== "undefined" && !document.hasFocus()) return;
+      const rect = v.getBoundingClientRect();
+      const inView = rect.bottom > 0 && rect.top < window.innerHeight;
+      if (!inView) return;
       e.preventDefault();   // stop page from scrolling
       if (v.paused) void v.play();
       else v.pause();
