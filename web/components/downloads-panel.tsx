@@ -69,7 +69,7 @@ function OutputRow({ file, href }: { file: OutputFile; href: string }) {
         download={file.name}
         className="shrink-0 rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/20"
       >
-        Κατέβασμα
+        Download
       </a>
     </li>
   );
