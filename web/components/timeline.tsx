@@ -17,9 +17,11 @@ interface Props {
   jobId: string;
   preset: string | undefined;
   edl: Edl;
+  /** Called after a successful toggle so the parent can flag "needs re-render". */
+  onDirty?: () => void;
 }
 
-export default function Timeline({ jobId, preset, edl }: Props) {
+export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
 
   // Group segments by clip for row layout; preserve original EDL index so we
@@ -52,7 +54,10 @@ export default function Timeline({ jobId, preset, edl }: Props) {
               items={bySegmentIndex.get(clip.clip_id) ?? []}
               selectedIndex={selected}
               onSelect={setSelected}
-              onToggle={(index, decision) => toggleMut.mutate({ index, decision })}
+              onToggle={(index, decision) => {
+                toggleMut.mutate({ index, decision });
+                onDirty?.();
+              }}
             />
           ))}
         </div>

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
@@ -37,6 +37,15 @@ export default function ReviewPage() {
   const qc = useQueryClient();
 
   const [preset, setPreset] = useState<string | null>(null);
+  // "dirty" = user toggled a segment since the last render. The preview mp4
+  // reflects the previous render only; we gate on this to tell the user when
+  // their edits aren't visible yet.
+  const [dirty, setDirty] = useState(false);
+  // Reset dirty when the user switches preset — each preset has its own EDL
+  // + rendered mp4, so dirty-against-preset-A doesn't apply to preset B.
+  useEffect(() => {
+    setDirty(false);
+  }, [preset]);
 
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
@@ -56,7 +65,10 @@ export default function ReviewPage() {
 
   const renderMut = useMutation({
     mutationFn: () => postRender(jobId, edlPreset ?? undefined),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["job", jobId] }),
+    onSuccess: () => {
+      setDirty(false);
+      qc.invalidateQueries({ queryKey: ["job", jobId] });
+    },
   });
 
   const isAll = job?.config?.preset === "all";
@@ -91,6 +103,7 @@ export default function ReviewPage() {
         <RerenderButton
           busy={renderMut.isPending || job?.status === "running"}
           disabled={job?.status !== "done"}
+          dirty={dirty}
           onClick={() => renderMut.mutate()}
         />
       </header>
@@ -121,13 +134,39 @@ export default function ReviewPage() {
         </p>
       ) : edlQuery.data ? (
         <>
+          {dirty ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              <span>
+                Έχεις αλλαγές που δεν φαίνονται ακόμη στο preview — πάτα{" "}
+                <span className="font-semibold">«Ξαναφτιάξε βίντεο»</span> για να εφαρμοστούν.
+              </span>
+              <button
+                type="button"
+                onClick={() => renderMut.mutate()}
+                disabled={renderMut.isPending}
+                className="shrink-0 rounded-md bg-amber-400 px-2.5 py-1 text-xs font-semibold text-amber-950 transition disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {renderMut.isPending ? "Φτιάχνει…" : "Εφάρμοσε"}
+              </button>
+            </div>
+          ) : null}
           <PreviewPlayer
             jobId={jobId}
             preset={edlPreset ?? undefined}
             cacheKey={job.updated_at}
           />
-          <Timeline jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
-          <Transcript jobId={jobId} preset={edlPreset ?? undefined} edl={edlQuery.data} />
+          <Timeline
+            jobId={jobId}
+            preset={edlPreset ?? undefined}
+            edl={edlQuery.data}
+            onDirty={() => setDirty(true)}
+          />
+          <Transcript
+            jobId={jobId}
+            preset={edlPreset ?? undefined}
+            edl={edlQuery.data}
+            onDirty={() => setDirty(true)}
+          />
           <DownloadsPanel
             jobId={jobId}
             preset={edlPreset ?? undefined}
@@ -152,18 +191,24 @@ function resolvePreset(
 function RerenderButton({
   busy,
   disabled,
+  dirty,
   onClick,
 }: {
   busy: boolean;
   disabled: boolean;
+  dirty: boolean;
   onClick: () => void;
 }) {
+  const base = "shrink-0 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400";
+  const color = dirty
+    ? "bg-amber-400 text-amber-950 ring-2 ring-amber-300/60 animate-pulse"
+    : "bg-emerald-500 text-emerald-950";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled || busy}
-      className="shrink-0 rounded-md bg-emerald-500 px-3 py-2 text-sm font-semibold text-emerald-950 transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
+      className={`${base} ${color}`}
     >
       {busy ? "Φτιάχνει βίντεο…" : "Ξαναφτιάξε βίντεο"}
     </button>

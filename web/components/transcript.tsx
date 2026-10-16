@@ -14,6 +14,8 @@ interface Props {
   /** Index into edl.segments of the currently-selected segment (optional). */
   selectedIndex?: number | null;
   onSelect?: (index: number) => void;
+  /** Called after a successful toggle so the parent can flag "needs re-render". */
+  onDirty?: () => void;
 }
 
 /** O(words + segments·log) assignment of each word to the segment that covers it. */
@@ -56,7 +58,7 @@ function findContainingSegment(
 }
 
 
-export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect }: Props) {
+export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty }: Props) {
   const toggleMut = useSegmentToggle(jobId, preset);
 
   // Group assignments by clip for display, preserving transcript word order.
@@ -102,6 +104,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
                   index: i,
                   decision: flip(seg.decision),
                 });
+                onDirty?.();
               }
             }}
           />
