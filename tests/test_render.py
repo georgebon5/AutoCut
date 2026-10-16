@@ -140,7 +140,7 @@ def test_cmd_output_path_is_last():
         Path("my_output.mp4"),
         default_cfg(),
     )
-    assert cmd[-1] == "my_output.mp4"
+    assert cmd[-1].endswith("my_output.mp4")
 
 
 def test_cmd_uses_libx264_and_aac():
@@ -161,8 +161,8 @@ def test_cmd_video_and_audio_are_separate_inputs():
         default_cfg(),
     )
     inputs = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-i"]
-    assert "proxy.mp4" in inputs
-    assert "audio.wav" in inputs
+    assert any(p.endswith("proxy.mp4") for p in inputs)
+    assert any(p.endswith("audio.wav") for p in inputs)
 
 
 # ---------------------------------------------------------------------------

@@ -92,12 +92,15 @@ def _build_render_cmd(
 
     fi = 0  # running ffmpeg input index
     for rs in kept:
-        cmd += ["-i", str(rs.video_path)]
+        # Resolve to absolute: when we pass cwd= to ffmpeg (needed so the
+        # subtitles filter can take just a filename), any relative input
+        # paths would otherwise be resolved against the wrong directory.
+        cmd += ["-i", str(rs.video_path.resolve())]
         video_idx.append(fi)
         fi += 1
 
         if rs.audio_path is not None:
-            cmd += ["-i", str(rs.audio_path)]
+            cmd += ["-i", str(rs.audio_path.resolve())]
             audio_idx.append(fi)
             fi += 1
         else:
@@ -179,7 +182,7 @@ def _build_render_cmd(
         "-map", audio_out,
         *video_codec_args,
         "-c:a", "aac", "-b:a", "128k",
-        str(output_path),
+        str(output_path.resolve()),
     ]
     return cmd
 
