@@ -78,6 +78,19 @@ class SegmentUpdate(BaseModel):
     decision: str   # "keep" or "cut"
 
 
+class WordUpdate(BaseModel):
+    """PATCH body for correcting a single transcript word's text."""
+    word: str
+
+
+class WordResponse(BaseModel):
+    clip_id: str
+    word_index: int
+    word: str
+    start: float
+    end: float
+
+
 class SegmentResponse(BaseModel):
     """Full segment view returned after a successful PATCH."""
     index: int

@@ -14,6 +14,7 @@ from typing import Sequence
 
 from sqlalchemy.orm import sessionmaker
 
+from autocut.captions import write_cut_captions
 from autocut.config import load_config
 from autocut.edl import load_edl
 from autocut.pipeline import (
@@ -136,6 +137,16 @@ def rerender_from_edl(
             hook=edl.hook,
             zoom=cfg.zoom,
         )
+        # Regenerate captions so they reflect both segment keep/cut changes
+        # AND any word-text corrections the user made via PATCH .../words/N.
+        # Stem must match the mp4 filename so the SRT/ASS lands next to it.
+        if any(t.words for t in edl.transcripts):
+            clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
+            stem = output_name.removesuffix(".mp4")
+            write_cut_captions(
+                edl, cfg.captions, workspace,
+                stem=stem, clip_order=clip_order,
+            )
         update_job(session_factory, job_id,
                    status="done", stage="complete", progress=1.0)
     except RenderError as e:

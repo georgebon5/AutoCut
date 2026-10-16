@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from autocut.edl import edl_to_dict, load_edl, save_edl
 from autocut_api.dependencies import get_db
 from autocut_api.models import Job, SegmentOverride
-from autocut_api.schemas import SegmentResponse, SegmentUpdate
+from autocut_api.schemas import SegmentResponse, SegmentUpdate, WordResponse, WordUpdate
 
 router = APIRouter(prefix="/jobs", tags=["edl"])
 
@@ -151,4 +151,60 @@ def patch_segment(
         interest_score=seg.interest_score,
         reasons=seg.reasons,
         features=seg.features,
+    )
+
+
+# Keep caption lines sane — mis-paste of a whole paragraph into one word
+# would blow up the SRT layout. 200 chars is well past any real correction.
+_MAX_WORD_LEN = 200
+
+
+@router.patch(
+    "/{job_id}/transcripts/{clip_id}/words/{word_index}",
+    response_model=WordResponse,
+)
+def patch_word(
+    job_id: str,
+    clip_id: str,
+    word_index: int,
+    update: WordUpdate,
+    preset: str | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> WordResponse:
+    """Correct a mis-transcribed word. Captions on next re-render reflect it."""
+    new_text = update.word.strip()
+    if not new_text:
+        raise HTTPException(status_code=422, detail="word must not be empty")
+    if len(new_text) > _MAX_WORD_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"word too long (max {_MAX_WORD_LEN} chars)",
+        )
+
+    job = get_done_job(session, job_id)
+    _, path = resolve_edl(job, preset)
+    edl = load_edl(path)
+
+    transcript = next((t for t in edl.transcripts if t.clip_id == clip_id), None)
+    if transcript is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"clip {clip_id} has no transcript",
+        )
+    if word_index < 0 or word_index >= len(transcript.words):
+        raise HTTPException(
+            status_code=400,
+            detail=f"word index {word_index} out of range [0, {len(transcript.words)})",
+        )
+
+    w = transcript.words[word_index]
+    w.word = new_text
+    save_edl(edl, path)
+
+    return WordResponse(
+        clip_id=clip_id,
+        word_index=word_index,
+        word=new_text,
+        start=w.start,
+        end=w.end,
     )

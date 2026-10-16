@@ -17,6 +17,7 @@ import type {
   SegmentResponse,
   SegmentUpdate,
   Upload,
+  WordResponse,
 } from "./api.types";
 
 const BASE = "/api";
@@ -122,6 +123,24 @@ export const patchSegment = (
     headers: { "content-type": "application/json" },
     body: JSON.stringify(update),
   });
+};
+
+export const patchWord = (
+  jobId: string,
+  clipId: string,
+  wordIndex: number,
+  word: string,
+  preset?: string,
+) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return request<WordResponse>(
+    `/jobs/${jobId}/transcripts/${encodeURIComponent(clipId)}/words/${wordIndex}${q}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ word }),
+    },
+  );
 };
 
 // ---------------------------------------------------------------------------

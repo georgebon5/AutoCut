@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
+import { useWordEdit } from "@/lib/use-word-edit";
 import type { Decision, Edl, SegmentDict, Transcript as TranscriptT, WordTimestamp } from "@/lib/api.types";
 
 
@@ -18,10 +19,16 @@ interface Props {
   onDirty?: () => void;
 }
 
+/** Carries the original word position in `transcript.words` for PATCH targeting. */
+interface WordAssignment {
+  segIndex: number;
+  word: WordTimestamp;
+  wordIndex: number;
+  clipId: string;
+}
+
 /** O(words + segments·log) assignment of each word to the segment that covers it. */
-function buildWordToSegment(
-  edl: Edl,
-): Array<{ segIndex: number; word: WordTimestamp; clipId: string }> {
+function buildWordToSegment(edl: Edl): WordAssignment[] {
   // Per-clip, sort segment indexes once; binary-search per word.
   const byClip = new Map<string, { index: number; seg: SegmentDict }[]>();
   edl.segments.forEach((seg, index) => {
@@ -33,14 +40,14 @@ function buildWordToSegment(
     list.sort((a, b) => a.seg.start - b.seg.start);
   }
 
-  const out: Array<{ segIndex: number; word: WordTimestamp; clipId: string }> = [];
+  const out: WordAssignment[] = [];
   for (const t of edl.transcripts) {
     const segs = byClip.get(t.clip_id) ?? [];
-    for (const w of t.words) {
+    t.words.forEach((w, wordIndex) => {
       const segIndex = findContainingSegment(segs, w.start);
-      if (segIndex < 0) continue;    // transcript word outside any segment: skip
-      out.push({ segIndex, word: w, clipId: t.clip_id });
-    }
+      if (segIndex < 0) return;    // transcript word outside any segment: skip
+      out.push({ segIndex, word: w, wordIndex, clipId: t.clip_id });
+    });
   }
   return out;
 }
@@ -58,8 +65,14 @@ function findContainingSegment(
 }
 
 
+type Mode = "toggle" | "edit";
+
 export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty }: Props) {
   const toggleMut = useSegmentToggle(jobId, preset);
+  const editMut = useWordEdit(jobId, preset);
+  const [mode, setMode] = useState<Mode>("toggle");
+  // Which word is currently being edited: (clipId, wordIndex) tuple.
+  const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
 
   // Group assignments by clip for display, preserving transcript word order.
   const groupedByClip = useMemo(() => {
@@ -82,11 +95,29 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     );
   }
 
+  const commitEdit = (clipId: string, wordIndex: number, next: string) => {
+    setEditing(null);
+    const t = edl.transcripts.find((x) => x.clip_id === clipId);
+    const current = t?.words[wordIndex]?.word ?? "";
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === current) return;    // no-op: nothing changed
+    editMut.mutate({ clipId, wordIndex, word: trimmed });
+    onDirty?.();
+  };
+
+  const headerHint =
+    mode === "edit"
+      ? "Κείμενο · πάτα μία λέξη για να τη διορθώσεις"
+      : "Κείμενο · πάτα μία λέξη για να κόψεις/κρατήσεις το κομμάτι της";
+
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
-        Κείμενο · πάτα μία λέξη για να κόψεις/κρατήσεις το κομμάτι της
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
+          {headerHint}
+        </h2>
+        <ModeToggle value={mode} onChange={(m) => { setMode(m); setEditing(null); }} />
+      </div>
 
       <div className="flex max-h-80 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-800 bg-gray-950 p-4">
         {edl.transcripts.map((t) => (
@@ -96,6 +127,11 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             segments={edl.segments}
             assignments={groupedByClip.get(t.clip_id) ?? []}
             selectedIndex={selectedIndex ?? null}
+            mode={mode}
+            editing={editing}
+            onStartEdit={(clipId, wordIndex) => setEditing({ clipId, wordIndex })}
+            onCommitEdit={commitEdit}
+            onCancelEdit={() => setEditing(null)}
             onSelect={(i) => {
               onSelect?.(i);
               const seg = edl.segments[i];
@@ -116,7 +152,38 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
           {(toggleMut.error as ApiError | Error).message}
         </p>
       ) : null}
+      {editMut.isError ? (
+        <p className="text-sm text-red-400">
+          {(editMut.error as ApiError | Error).message}
+        </p>
+      ) : null}
     </section>
+  );
+}
+
+
+function ModeToggle({ value, onChange }: { value: Mode; onChange: (m: Mode) => void }) {
+  return (
+    <div className="flex shrink-0 rounded-md border border-gray-700 bg-gray-900 text-xs">
+      <button
+        type="button"
+        onClick={() => onChange("toggle")}
+        className={`rounded-l-md px-2 py-1 transition ${
+          value === "toggle" ? "bg-emerald-500 text-emerald-950" : "text-gray-300 hover:text-white"
+        }`}
+      >
+        Κόψιμο
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("edit")}
+        className={`rounded-r-md px-2 py-1 transition ${
+          value === "edit" ? "bg-sky-500 text-sky-950" : "text-gray-300 hover:text-white"
+        }`}
+      >
+        Διόρθωση κειμένου
+      </button>
+    </div>
   );
 }
 
@@ -126,12 +193,22 @@ function ClipTranscript({
   segments,
   assignments,
   selectedIndex,
+  mode,
+  editing,
+  onStartEdit,
+  onCommitEdit,
+  onCancelEdit,
   onSelect,
 }: {
   transcript: TranscriptT;
   segments: SegmentDict[];
-  assignments: Array<{ segIndex: number; word: WordTimestamp; clipId: string }>;
+  assignments: WordAssignment[];
   selectedIndex: number | null;
+  mode: Mode;
+  editing: { clipId: string; wordIndex: number } | null;
+  onStartEdit: (clipId: string, wordIndex: number) => void;
+  onCommitEdit: (clipId: string, wordIndex: number, next: string) => void;
+  onCancelEdit: () => void;
   onSelect: (segIndex: number) => void;
 }) {
   if (assignments.length === 0) return null;
@@ -147,17 +224,39 @@ function ClipTranscript({
           if (!seg) return null;
           const keep = seg.decision === "keep";
           const active = selectedIndex === a.segIndex;
+          const isEditing =
+            editing !== null
+            && editing.clipId === a.clipId
+            && editing.wordIndex === a.wordIndex;
+
+          if (isEditing) {
+            return (
+              <WordEditor
+                key={i}
+                initial={a.word.word.trim()}
+                onCommit={(next) => onCommitEdit(a.clipId, a.wordIndex, next)}
+                onCancel={onCancelEdit}
+              />
+            );
+          }
           return (
             <button
               key={i}
               type="button"
-              onClick={() => onSelect(a.segIndex)}
+              onClick={() => {
+                if (mode === "edit") {
+                  onStartEdit(a.clipId, a.wordIndex);
+                } else {
+                  onSelect(a.segIndex);
+                }
+              }}
               className={[
                 "inline rounded px-0.5 transition",
                 keep
                   ? "text-gray-100 hover:bg-emerald-500/20"
                   : "text-gray-500 line-through hover:bg-gray-700/60",
                 active ? "ring-1 ring-sky-400" : "",
+                mode === "edit" ? "cursor-text hover:bg-sky-500/20" : "",
               ].join(" ")}
             >
               {a.word.word.trim()}
@@ -170,6 +269,42 @@ function ClipTranscript({
         }, [])}
       </p>
     </div>
+  );
+}
+
+
+function WordEditor({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (next: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  // Rough-width autosize: scales with current content so the input doesn't
+  // flex the surrounding line too much.
+  const width = Math.max(4, value.length + 1);
+  return (
+    <input
+      type="text"
+      autoFocus
+      value={value}
+      size={width}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onCommit(value);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      onBlur={() => onCommit(value)}
+      className="inline rounded border border-sky-400 bg-gray-900 px-1 text-sm text-sky-100 outline-none"
+    />
   );
 }
 

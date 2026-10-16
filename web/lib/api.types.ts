@@ -123,6 +123,18 @@ export interface SegmentUpdate {
   decision: Decision;
 }
 
+export interface WordUpdate {
+  word: string;
+}
+
+export interface WordResponse {
+  clip_id: string;
+  word_index: number;
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface SegmentResponse {
   index: number;
   clip_id: string;
