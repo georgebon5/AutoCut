@@ -46,6 +46,7 @@ def post_render(
     job_id: str,
     request: Request,
     preset: str | None = Query(default=None),
+    burn_subtitles: bool = Query(default=False),
     session: Session = Depends(get_db),
 ) -> JobResponse:
     job = get_done_job(session, job_id)
@@ -63,8 +64,10 @@ def post_render(
 
     runner = request.app.state.runner
     session_factory = request.app.state.session_factory
+    burn = burn_subtitles
     runner.submit(lambda: rerender_from_edl(
         job_id, workspace, edl_path, output_name, session_factory,
+        burn_subtitles_flag=burn,
     ))
 
     # Return the current (freshly re-fetched) job snapshot so the client sees

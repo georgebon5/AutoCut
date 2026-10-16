@@ -154,6 +154,32 @@ def _build_render_cmd(
     return cmd
 
 
+def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> None:
+    """Overlay an ASS/SRT subtitle file onto ``input_mp4`` → ``output_mp4``.
+
+    Done as a second pass so the base render stays clean (no re-encode of the
+    audio) and so burning is opt-in without complicating the main filter graph.
+    Audio is stream-copied; only the video gets re-encoded by libass.
+    """
+    # The `subtitles` filter parses the arg as a filter expression, which
+    # treats ':' and '\' as syntax chars. Escape both so absolute paths on
+    # darwin ("/Users/...") work; single quotes get escaped for the filter.
+    sub_arg = (
+        str(subtitles_path)
+        .replace("\\", r"\\\\")
+        .replace(":", r"\:")
+        .replace("'", r"\'")
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_mp4),
+        "-vf", f"subtitles='{sub_arg}'",
+        "-c:a", "copy",
+        str(output_mp4),
+    ]
+    _run(cmd)
+
+
 def render(
     proxies: list[ProxyInfo],
     segments: list[Segment],

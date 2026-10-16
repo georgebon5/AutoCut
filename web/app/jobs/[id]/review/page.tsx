@@ -37,6 +37,10 @@ export default function ReviewPage() {
   const qc = useQueryClient();
 
   const [preset, setPreset] = useState<string | null>(null);
+  // Burn subtitles into the mp4 on next render. Off by default so the base
+  // output stays clean for NLE import; user opts in when they want a
+  // standalone video with hard-coded captions.
+  const [burnSubs, setBurnSubs] = useState(false);
   // "dirty" = user toggled a segment since the last render. The preview mp4
   // reflects the previous render only; we gate on this to tell the user when
   // their edits aren't visible yet.
@@ -64,7 +68,8 @@ export default function ReviewPage() {
   });
 
   const renderMut = useMutation({
-    mutationFn: () => postRender(jobId, edlPreset ?? undefined),
+    mutationFn: () =>
+      postRender(jobId, edlPreset ?? undefined, { burnSubtitles: burnSubs }),
     onSuccess: () => {
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["job", jobId] });
@@ -159,6 +164,23 @@ export default function ReviewPage() {
             cacheKey={job.updated_at}
             rendering={rendering}
           />
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              checked={burnSubs}
+              onChange={(e) => {
+                setBurnSubs(e.target.checked);
+                setDirty(true);
+              }}
+              className="h-4 w-4 accent-sky-500"
+            />
+            <span>
+              Υπότιτλοι μέσα στο βίντεο
+              <span className="ml-1 text-xs text-gray-500">
+                (μόνο για τις λέξεις που κρατάς· χρειάζεται re-render)
+              </span>
+            </span>
+          </label>
           <Timeline
             jobId={jobId}
             preset={edlPreset ?? undefined}

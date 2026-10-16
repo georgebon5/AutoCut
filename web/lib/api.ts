@@ -158,8 +158,15 @@ export const outputDownloadUrl = (jobId: string, filename: string) =>
 // Re-render (cached — no re-analysis)
 // ---------------------------------------------------------------------------
 
-export const postRender = (jobId: string, preset?: string) => {
-  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+export const postRender = (
+  jobId: string,
+  preset?: string,
+  opts?: { burnSubtitles?: boolean },
+) => {
+  const params = new URLSearchParams();
+  if (preset) params.set("preset", preset);
+  if (opts?.burnSubtitles) params.set("burn_subtitles", "true");
+  const q = params.toString() ? `?${params.toString()}` : "";
   return request<Job>(`/jobs/${jobId}/render${q}`, { method: "POST" });
 };
 

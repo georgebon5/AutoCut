@@ -23,7 +23,7 @@ from autocut.pipeline import (
     PipelineReporter,
     run_pipeline,
 )
-from autocut.render import RenderError, render
+from autocut.render import RenderError, burn_subtitles, render
 from autocut_api.jobs import update_job
 from autocut_api.models import Job
 
@@ -108,6 +108,7 @@ def rerender_from_edl(
     edl_path: Path,
     output_name: str,
     session_factory: sessionmaker,
+    burn_subtitles_flag: bool = False,
 ) -> None:
     """Re-render ``output_name`` using the EDL on disk — no re-analysis.
 
@@ -115,6 +116,11 @@ def rerender_from_edl(
     fast: proxies are already extracted, segments + hook + features are in
     the EDL, so we skip ingest, VAD, transcribe, scoring entirely and jump
     straight to the ffmpeg concat.
+
+    When ``burn_subtitles_flag`` is True, the regenerated ASS captions are
+    overlaid onto the mp4 as a second pass so the output has hard-coded
+    subtitles. When False, the base mp4 stays clean and captions remain
+    side files for NLE import.
     """
     try:
         update_job(session_factory, job_id,
@@ -140,13 +146,25 @@ def rerender_from_edl(
         # Regenerate captions so they reflect both segment keep/cut changes
         # AND any word-text corrections the user made via PATCH .../words/N.
         # Stem must match the mp4 filename so the SRT/ASS lands next to it.
+        stem = output_name.removesuffix(".mp4")
+        captions_written: dict[str, Path] = {}
         if any(t.words for t in edl.transcripts):
             clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
-            stem = output_name.removesuffix(".mp4")
-            write_cut_captions(
+            captions_written = write_cut_captions(
                 edl, cfg.captions, workspace,
                 stem=stem, clip_order=clip_order,
             )
+        # Second pass: burn ASS onto the mp4 in place when requested. We write
+        # to a temp name first so a failed burn doesn't leave the clean mp4
+        # replaced by a half-written file.
+        if burn_subtitles_flag and "ass" in captions_written:
+            final_mp4 = workspace / output_name
+            tmp_mp4 = workspace / f"{stem}.subs.tmp.mp4"
+            try:
+                burn_subtitles(final_mp4, captions_written["ass"], tmp_mp4)
+                tmp_mp4.replace(final_mp4)
+            finally:
+                tmp_mp4.unlink(missing_ok=True)
         update_job(session_factory, job_id,
                    status="done", stage="complete", progress=1.0)
     except RenderError as e:
