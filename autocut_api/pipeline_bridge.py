@@ -160,16 +160,24 @@ def rerender_from_edl(
         # Second pass: burn ASS onto the mp4 in place when requested. We write
         # to a temp name first so a failed burn doesn't leave the clean mp4
         # replaced by a half-written file.
+        burn_error: str | None = None
         if burn_subtitles_flag and "ass" in captions_written:
             final_mp4 = workspace / output_name
             tmp_mp4 = workspace / f"{stem}.subs.tmp.mp4"
             try:
                 burn_subtitles(final_mp4, captions_written["ass"], tmp_mp4)
                 tmp_mp4.replace(final_mp4)
+            except RenderError as burn_e:
+                # Burn is a nice-to-have; the clean mp4 + side SRT/ASS still
+                # cover the user's workflow. Surface the error on the job but
+                # don't throw away the fresh preview the user is waiting for.
+                log.warning("burn-in failed for job %s: %s", job_id, burn_e)
+                burn_error = f"υπότιτλοι μέσα στο βίντεο δεν μπήκαν: {burn_e}"
             finally:
                 tmp_mp4.unlink(missing_ok=True)
         update_job(session_factory, job_id,
-                   status="done", stage="complete", progress=1.0, error=None)
+                   status="done", stage="complete", progress=1.0,
+                   error=burn_error)
     except RenderError as e:
         # Re-render failure must NOT turn the job to "failed" — the initial
         # outputs are still on disk and valid. Keep the job usable (status
