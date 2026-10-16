@@ -36,30 +36,44 @@ export default function UploadForm() {
   const [creatingJob, setCreatingJob] = useState(false);
   const [jobError, setJobError] = useState<string | null>(null);
 
-  const updateItem = (idx: number, patch: Partial<UploadItem>) =>
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  // Reorder by file identity, not index, so an in-flight upload tracked by
+  // `addFiles` keeps writing to the right slot after a reorder.
+  const moveItem = (file: File, direction: -1 | 1) =>
+    setItems((prev) => {
+      const idx = prev.indexOf(prev.find((it) => it.file === file)!);
+      const target = idx + direction;
+      if (idx < 0 || target < 0 || target >= prev.length) return prev;
+      const next = prev.slice();
+      [next[idx], next[target]] = [next[target]!, next[idx]!];
+      return next;
+    });
+
+  const removeItem = (file: File) =>
+    setItems((prev) => prev.filter((it) => it.file !== file));
+
+  // Patch an item by file identity — reorder/remove may shift its index.
+  const patchByFile = (file: File, patch: Partial<UploadItem>) =>
+    setItems((prev) => prev.map((it) => (it.file === file ? { ...it, ...patch } : it)));
 
   const addFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const starting = Array.from(files).map(
       (f): UploadItem => ({ file: f, state: "pending", uploaded: 0 }),
     );
-    const startIndex = items.length;
     setItems((prev) => [...prev, ...starting]);
 
     // Upload in parallel across files, sequentially within each.
     await Promise.allSettled(
-      starting.map(async (it, i) => {
-        const idx = startIndex + i;
-        updateItem(idx, { state: "uploading" });
+      starting.map(async (it) => {
+        patchByFile(it.file, { state: "uploading" });
         try {
           const uploadId = await uploadFileChunked(it.file, {
-            onProgress: (bytes) => updateItem(idx, { uploaded: bytes }),
+            onProgress: (bytes) => patchByFile(it.file, { uploaded: bytes }),
           });
-          updateItem(idx, { state: "complete", uploadId });
+          patchByFile(it.file, { state: "complete", uploadId });
         } catch (e) {
           const msg = e instanceof ApiError ? e.detail : String(e);
-          updateItem(idx, { state: "failed", error: msg });
+          patchByFile(it.file, { state: "failed", error: msg });
         }
       }),
     );
@@ -119,11 +133,26 @@ export default function UploadForm() {
       </div>
 
       {items.length > 0 ? (
-        <ul className="flex flex-col gap-2">
-          {items.map((it, i) => (
-            <UploadItemRow key={i} item={it} />
-          ))}
-        </ul>
+        <>
+          <p className="text-xs text-gray-400">
+            Η σειρά παρακάτω είναι αυτή που θα μπουν στο τελικό cut.
+            Σύρε με τα βελάκια για αναδιάταξη (π.χ. πρωί → μεσημέρι → απόγευμα).
+          </p>
+          <ul className="flex flex-col gap-2">
+            {items.map((it, i) => (
+              <UploadItemRow
+                key={it.file.name + ":" + it.file.lastModified + ":" + it.file.size}
+                item={it}
+                index={i}
+                isFirst={i === 0}
+                isLast={i === items.length - 1}
+                onMoveUp={() => moveItem(it.file, -1)}
+                onMoveDown={() => moveItem(it.file, 1)}
+                onRemove={() => removeItem(it.file)}
+              />
+            ))}
+          </ul>
+        </>
       ) : null}
 
       <fieldset
@@ -181,7 +210,23 @@ export default function UploadForm() {
   );
 }
 
-function UploadItemRow({ item }: { item: UploadItem }) {
+function UploadItemRow({
+  item,
+  index,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
+  onRemove,
+}: {
+  item: UploadItem;
+  index: number;
+  isFirst: boolean;
+  isLast: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
   const pct = item.file.size > 0
     ? Math.round((item.uploaded / item.file.size) * 100)
     : 0;
@@ -191,22 +236,63 @@ function UploadItemRow({ item }: { item: UploadItem }) {
         : "bg-sky-500";
 
   return (
-    <li className="rounded-md border border-gray-800 bg-gray-900/60 p-3">
-      <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="truncate font-medium" title={item.file.name}>
-          {item.file.name}
-        </span>
-        <span className="shrink-0 text-xs text-gray-400">
-          {formatBytes(item.file.size)} · {labelFor(item.state)}
-        </span>
+    <li className="flex items-stretch gap-2 rounded-md border border-gray-800 bg-gray-900/60 p-3">
+      <div className="flex w-6 shrink-0 items-center justify-center text-xs font-semibold text-gray-500">
+        {index + 1}
       </div>
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-gray-800">
-        <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <span className="truncate font-medium" title={item.file.name}>
+            {item.file.name}
+          </span>
+          <span className="shrink-0 text-xs text-gray-400">
+            {formatBytes(item.file.size)} · {labelFor(item.state)}
+          </span>
+        </div>
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-gray-800">
+          <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+        </div>
+        {item.error ? (
+          <p className="mt-2 text-xs text-red-400">{item.error}</p>
+        ) : null}
       </div>
-      {item.error ? (
-        <p className="mt-2 text-xs text-red-400">{item.error}</p>
-      ) : null}
+      <div className="flex shrink-0 flex-col items-center justify-center gap-1">
+        <OrderButton label="Πάνω" symbol="↑" disabled={isFirst} onClick={onMoveUp} />
+        <OrderButton label="Κάτω" symbol="↓" disabled={isLast} onClick={onMoveDown} />
+        <button
+          type="button"
+          aria-label="Αφαίρεση"
+          onClick={onRemove}
+          className="rounded-md px-1.5 py-0.5 text-xs text-gray-500 transition hover:text-red-400"
+        >
+          ×
+        </button>
+      </div>
     </li>
+  );
+}
+
+function OrderButton({
+  label,
+  symbol,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  symbol: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded-md border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+    >
+      {symbol}
+    </button>
   );
 }
 
