@@ -217,7 +217,7 @@ def test_cmd_only_zoomed_segments_get_zoom_filter():
 def _patch_run(monkeypatch) -> list[list[str]]:
     captured: list[list[str]] = []
     import autocut.render as render_mod
-    monkeypatch.setattr(render_mod, "_run", lambda cmd: captured.append(cmd))
+    monkeypatch.setattr(render_mod, "_run", lambda cmd, cwd=None: captured.append(cmd))
     return captured
 
 

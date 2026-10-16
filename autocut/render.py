@@ -39,8 +39,8 @@ class RenderError(Exception):
     pass
 
 
-def _run(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+def _run(cmd: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if result.returncode != 0:
         raise RenderError(
             f"ffmpeg render failed:\n{result.stderr[-3000:]}"
@@ -68,6 +68,7 @@ def _build_render_cmd(
     output_path: Path,
     cfg: RenderConfig,
     fast_preview: bool = False,
+    subtitles_filename: str | None = None,
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -127,13 +128,17 @@ def _build_render_cmd(
                 f"atrim=duration={rs.duration:.6f}[a{i}]"
             )
 
+    # Build the pre-subtitles video label first; append the subtitles filter
+    # as an additional link if requested. Doing concat + subs in one filter
+    # graph saves a whole decode/encode pass vs. burning subs as a separate
+    # ffmpeg call afterwards.
     if N == 1:
-        video_out = "[v0]"
+        video_pre_subs = "[v0]"
         audio_out = "[a0]"
     else:
         video_in = "".join(f"[v{i}]" for i in range(N))
-        filters.append(f"{video_in}concat=n={N}:v=1:a=0[vout]")
-        video_out = "[vout]"
+        filters.append(f"{video_in}concat=n={N}:v=1:a=0[vconcat]")
+        video_pre_subs = "[vconcat]"
 
         current = "[a0]"
         for i in range(1, N):
@@ -143,6 +148,12 @@ def _build_render_cmd(
             )
             current = label
         audio_out = "[aout]"
+
+    if subtitles_filename:
+        filters.append(f"{video_pre_subs}subtitles={subtitles_filename}[vout]")
+        video_out = "[vout]"
+    else:
+        video_out = video_pre_subs
 
     # Pick the video codec. In fast_preview mode (used for re-renders during
     # review) we lean on Apple's hardware H.264 encoder — 3-5x faster than
@@ -194,24 +205,34 @@ def _supports_videotoolbox() -> bool:
     return _videotoolbox_cache
 
 
+_subtitles_filter_cache: bool | None = None
+
+
 def _has_subtitles_filter() -> bool:
     """True iff the installed ffmpeg was built with libass (filter available).
 
     Some Homebrew builds (9.x HEAD etc.) ship without libass and omit the
     ``subtitles`` filter entirely. Detecting that up front lets us raise an
-    actionable error instead of a 3-KB ffmpeg traceback.
+    actionable error instead of a 3-KB ffmpeg traceback. Cached — probing
+    ffmpeg's filter list costs ~100ms and we hit this on every re-render.
     """
+    global _subtitles_filter_cache
+    if _subtitles_filter_cache is not None:
+        return _subtitles_filter_cache
     try:
         result = subprocess.run(
             ["ffmpeg", "-hide_banner", "-filters"],
             capture_output=True, text=True, timeout=5,
         )
     except (OSError, subprocess.SubprocessError):
+        _subtitles_filter_cache = False
         return False
     for line in result.stdout.splitlines():
         parts = line.split()
         if len(parts) >= 2 and parts[1] == "subtitles":
+            _subtitles_filter_cache = True
             return True
+    _subtitles_filter_cache = False
     return False
 
 
@@ -225,9 +246,10 @@ def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> N
     if not _has_subtitles_filter():
         raise RenderError(
             "Your ffmpeg was built without libass, so burn-in subtitles aren't "
-            "available. Reinstall with `brew reinstall ffmpeg` (macOS) or "
-            "install a build that includes --enable-libass. The SRT/ASS files "
-            "in the Downloads panel still work for NLE import."
+            "available. On macOS Homebrew the regular `ffmpeg` formula ships "
+            "without it — install the full build instead: "
+            "`brew install ffmpeg-full && brew link --overwrite --force ffmpeg-full`. "
+            "The SRT/ASS files in the Downloads panel still work for NLE import."
         )
 
     # ffmpeg's `subtitles` filter parses its arg as filter-graph syntax: ':'
@@ -267,6 +289,7 @@ def render(
     hook: Segment | None = None,
     zoom: ZoomConfig | None = None,
     fast_preview: bool = False,
+    subtitles_path: Path | None = None,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -338,6 +361,19 @@ def render(
     if hook is not None:
         kept_render.insert(0, _to_render_segment(hook, allow_zoom=False))
 
-    cmd = _build_render_cmd(kept_render, output_path, cfg, fast_preview=fast_preview)
-    _run(cmd)
+    # When burning subs we pass just the filename and set ffmpeg's cwd to the
+    # output dir — avoids filter-graph escaping headaches with ':' / '\' in
+    # absolute paths. Proxies stay as absolute paths so cwd doesn't affect
+    # them.
+    subs_name: str | None = None
+    cwd: Path | None = None
+    if subtitles_path is not None:
+        subs_name = subtitles_path.name
+        cwd = output_dir
+    cmd = _build_render_cmd(
+        kept_render, output_path, cfg,
+        fast_preview=fast_preview,
+        subtitles_filename=subs_name,
+    )
+    _run(cmd, cwd=cwd)
     return output_path

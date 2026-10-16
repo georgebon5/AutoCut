@@ -206,7 +206,7 @@ def test_render_with_only_hook_no_kept(tmp_path: Path):
     import autocut.render as render_mod
     calls: list[list[str]] = []
     orig = render_mod._run
-    render_mod._run = lambda cmd: calls.append(cmd)
+    render_mod._run = lambda cmd, cwd=None: calls.append(cmd)
     try:
         proxy = ProxyInfo(
             clip_id="c", original_path=Path("v.mp4"), proxy_path=Path("v.mp4"),

@@ -23,7 +23,8 @@ from autocut.pipeline import (
     PipelineReporter,
     run_pipeline,
 )
-from autocut.render import RenderError, burn_subtitles, render
+from autocut.render import RenderError, burn_subtitles, render  # noqa: F401
+from autocut.render import _has_subtitles_filter
 from autocut_api.jobs import update_job
 from autocut_api.models import Job
 
@@ -134,6 +135,31 @@ def rerender_from_edl(
             cfg.zoom.enabled = True
 
         edl = load_edl(edl_path)
+        # Regenerate captions first — they're derived from the EDL, so they
+        # don't need the rendered mp4; and when burning subs we need the ASS
+        # file to exist before ffmpeg starts.
+        stem = output_name.removesuffix(".mp4")
+        captions_written: dict[str, Path] = {}
+        if any(t.words for t in edl.transcripts):
+            clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
+            captions_written = write_cut_captions(
+                edl, cfg.captions, workspace,
+                stem=stem, clip_order=clip_order,
+            )
+        # Burn is folded into the main render as a single ffmpeg pass (saves a
+        # whole encode vs. doing a second overlay pass). Preflight the libass
+        # check so a missing filter degrades to "clean mp4 + warning" instead
+        # of failing the whole render.
+        subtitles_path: Path | None = None
+        burn_error: str | None = None
+        if burn_subtitles_flag and "ass" in captions_written:
+            if _has_subtitles_filter():
+                subtitles_path = captions_written["ass"]
+            else:
+                burn_error = (
+                    "υπότιτλοι μέσα στο βίντεο δεν μπήκαν: ffmpeg χωρίς libass "
+                    "— εγκατάσταση ffmpeg-full για burn-in"
+                )
         render(
             proxies=edl.clips,
             segments=edl.segments,
@@ -145,36 +171,8 @@ def rerender_from_edl(
             # Re-renders are review previews, not final deliverables — use
             # the hardware encoder when available to cut encode time by ~3-5x.
             fast_preview=True,
+            subtitles_path=subtitles_path,
         )
-        # Regenerate captions so they reflect both segment keep/cut changes
-        # AND any word-text corrections the user made via PATCH .../words/N.
-        # Stem must match the mp4 filename so the SRT/ASS lands next to it.
-        stem = output_name.removesuffix(".mp4")
-        captions_written: dict[str, Path] = {}
-        if any(t.words for t in edl.transcripts):
-            clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
-            captions_written = write_cut_captions(
-                edl, cfg.captions, workspace,
-                stem=stem, clip_order=clip_order,
-            )
-        # Second pass: burn ASS onto the mp4 in place when requested. We write
-        # to a temp name first so a failed burn doesn't leave the clean mp4
-        # replaced by a half-written file.
-        burn_error: str | None = None
-        if burn_subtitles_flag and "ass" in captions_written:
-            final_mp4 = workspace / output_name
-            tmp_mp4 = workspace / f"{stem}.subs.tmp.mp4"
-            try:
-                burn_subtitles(final_mp4, captions_written["ass"], tmp_mp4)
-                tmp_mp4.replace(final_mp4)
-            except RenderError as burn_e:
-                # Burn is a nice-to-have; the clean mp4 + side SRT/ASS still
-                # cover the user's workflow. Surface the error on the job but
-                # don't throw away the fresh preview the user is waiting for.
-                log.warning("burn-in failed for job %s: %s", job_id, burn_e)
-                burn_error = f"υπότιτλοι μέσα στο βίντεο δεν μπήκαν: {burn_e}"
-            finally:
-                tmp_mp4.unlink(missing_ok=True)
         update_job(session_factory, job_id,
                    status="done", stage="complete", progress=1.0,
                    error=burn_error)
