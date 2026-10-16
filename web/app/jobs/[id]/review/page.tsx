@@ -72,6 +72,9 @@ export default function ReviewPage() {
   });
 
   const isAll = job?.config?.preset === "all";
+  // Re-render transiently flips the job back to "running"; capture that here
+  // because the narrowed branch below loses the "running" possibility.
+  const rendering = renderMut.isPending || job?.status === "running";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-8">
@@ -101,7 +104,7 @@ export default function ReviewPage() {
           </Link>
         </div>
         <RerenderButton
-          busy={renderMut.isPending || job?.status === "running"}
+          busy={rendering}
           disabled={job?.status !== "done"}
           dirty={dirty}
           onClick={() => renderMut.mutate()}
@@ -154,6 +157,7 @@ export default function ReviewPage() {
             jobId={jobId}
             preset={edlPreset ?? undefined}
             cacheKey={job.updated_at}
+            rendering={rendering}
           />
           <Timeline
             jobId={jobId}

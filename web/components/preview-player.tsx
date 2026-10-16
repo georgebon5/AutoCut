@@ -11,9 +11,11 @@ interface Props {
   preset: string | undefined;
   /** job.updated_at — included in the video URL so re-renders bust the cache. */
   cacheKey: string;
+  /** True while the backend is re-rendering; preview is stale until it finishes. */
+  rendering?: boolean;
 }
 
-export default function PreviewPlayer({ jobId, preset, cacheKey }: Props) {
+export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false }: Props) {
   const outputsQ = useQuery({
     queryKey: ["outputs", jobId, cacheKey],
     queryFn: () => listOutputs(jobId),
@@ -37,14 +39,27 @@ export default function PreviewPlayer({ jobId, preset, cacheKey }: Props) {
       <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
         Προεπισκόπηση · {videoName}
       </h2>
-      <video
-        key={src}            /* force reload on cache-key change */
-        controls
-        playsInline
-        preload="metadata"
-        className="w-full rounded-lg border border-gray-800 bg-black"
-        src={src}
-      />
+      <div className="relative">
+        <video
+          key={src}            /* force reload on cache-key change */
+          controls
+          playsInline
+          preload="metadata"
+          className={`w-full rounded-lg border border-gray-800 bg-black transition ${
+            rendering ? "opacity-40" : ""
+          }`}
+          src={src}
+        />
+        {rendering ? (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/40 text-center text-sm text-amber-200">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-amber-300 border-t-transparent" />
+            <div className="font-medium">Φτιάχνει το νέο βίντεο…</div>
+            <div className="text-xs text-amber-200/80">
+              Αυτό που βλέπεις είναι η προηγούμενη έκδοση.
+            </div>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
