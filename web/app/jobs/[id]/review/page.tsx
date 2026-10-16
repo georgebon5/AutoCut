@@ -94,28 +94,31 @@ export default function ReviewPage() {
   const rendering = renderMut.isPending || job?.status === "running";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-8">
-      <header className="flex items-center justify-between gap-4">
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-12">
+      <header className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href="/" className="text-sm text-gray-400 hover:text-white">
+          <Link
+            href="/"
+            className="text-xs font-medium uppercase tracking-[0.2em] text-white/40 transition hover:text-white/70"
+          >
             ← Jobs
           </Link>
-          <h1 className="mt-1 truncate text-xl font-semibold tracking-tight">
-            Έλεγχος · {jobId.slice(0, 8)}…
+          <h1 className="mt-2 bg-gradient-to-br from-white to-white/60 bg-clip-text text-2xl font-light tracking-tight text-transparent">
+            Έλεγχος <span className="font-mono text-lg text-white/40">· {jobId.slice(0, 8)}</span>
           </h1>
           {job ? (
-            <p className="text-xs text-gray-500">
+            <p className="mt-1 text-xs text-white/40">
               {STATUS_LABEL[job.status]} · {job.stage}
             </p>
           ) : null}
           {job?.config?.model_used ? (
-            <p className="mt-0.5 text-xs text-sky-400">
+            <p className="mt-1 text-xs text-cyan-300/80">
               Σκοράρισμα από εκπαιδευμένο μοντέλο
             </p>
           ) : null}
           <Link
             href={`/jobs/${jobId}/overrides`}
-            className="mt-1 inline-block text-xs text-sky-400 hover:text-sky-300"
+            className="mt-2 inline-block text-xs text-white/50 transition hover:text-cyan-300"
           >
             Οι αλλαγές μου →
           </Link>
@@ -138,9 +141,9 @@ export default function ReviewPage() {
           status is "done" — surface them so the user sees why the last
           re-render didn't apply. */}
       {job?.error && !rendering ? (
-        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+        <div className="rounded-2xl border border-red-400/20 bg-red-500/5 p-4 text-sm text-red-100/90 backdrop-blur">
           <div className="font-medium">Αποτυχία τελευταίας εφαρμογής αλλαγών</div>
-          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-xs text-red-200/80">
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-xs text-red-200/70">
             {job.error}
           </pre>
         </div>
@@ -167,7 +170,7 @@ export default function ReviewPage() {
       ) : edlQuery.data ? (
         <>
           {dirty ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100/90 backdrop-blur">
               <span>
                 Έχεις αλλαγές που δεν φαίνονται ακόμη στο preview — πάτα{" "}
                 <span className="font-semibold">«Ξαναφτιάξε βίντεο»</span> για να εφαρμοστούν.
@@ -176,7 +179,7 @@ export default function ReviewPage() {
                 type="button"
                 onClick={() => renderMut.mutate()}
                 disabled={renderMut.isPending}
-                className="shrink-0 rounded-md bg-amber-400 px-2.5 py-1 text-xs font-semibold text-amber-950 transition disabled:cursor-not-allowed disabled:opacity-60"
+                className="shrink-0 rounded-xl bg-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {renderMut.isPending ? "Φτιάχνει…" : "Εφάρμοσε"}
               </button>
@@ -188,8 +191,8 @@ export default function ReviewPage() {
             cacheKey={job.updated_at}
             rendering={rendering}
           />
-          <div className="flex flex-col gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-300">
+          <div className="glass-card flex flex-col gap-4 rounded-2xl p-4">
+            <label className="flex items-center gap-3 text-sm text-white/80">
               <input
                 type="checkbox"
                 checked={burnSubs}
@@ -197,12 +200,12 @@ export default function ReviewPage() {
                   setBurnSubs(e.target.checked);
                   setDirty(true);
                 }}
-                className="h-4 w-4 accent-sky-500"
+                className="h-4 w-4 accent-cyan-400"
               />
               <span>
                 Υπότιτλοι μέσα στο βίντεο
-                <span className="ml-1 text-xs text-gray-500">
-                  (μόνο για τις λέξεις που κρατάς· χρειάζεται re-render)
+                <span className="ml-1 text-xs text-white/40">
+                  (μόνο για τις λέξεις που κρατάς · χρειάζεται re-render)
                 </span>
               </span>
             </label>
@@ -260,16 +263,17 @@ function RerenderButton({
   dirty: boolean;
   onClick: () => void;
 }) {
-  const base = "shrink-0 rounded-md px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400";
+  const base = "shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold tracking-wide transition disabled:cursor-not-allowed disabled:text-white/30";
   const color = dirty
-    ? "bg-amber-400 text-amber-950 ring-2 ring-amber-300/60 animate-pulse"
-    : "bg-emerald-500 text-emerald-950";
+    ? "bg-amber-400 text-amber-950 shadow-xl shadow-amber-400/25 animate-pulse"
+    : "btn-primary-gradient shadow-xl shadow-cyan-500/15";
+  const disabledLook = "disabled:bg-none disabled:bg-white/5 disabled:shadow-none";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled || busy}
-      className={`${base} ${color}`}
+      className={`${base} ${color} ${disabledLook}`}
     >
       {busy ? "Φτιάχνει βίντεο…" : "Ξαναφτιάξε βίντεο"}
     </button>
@@ -284,7 +288,7 @@ function PresetPicker({
   onChange: (next: string) => void;
 }) {
   return (
-    <div className="flex gap-2">
+    <div className="glass-card inline-flex gap-1 rounded-2xl p-1">
       {PRESET_OPTIONS.map((p) => {
         const active = value === p;
         return (
@@ -292,10 +296,10 @@ function PresetPicker({
             key={p}
             type="button"
             onClick={() => onChange(p)}
-            className={`rounded-md px-3 py-1.5 text-sm transition ${
+            className={`rounded-xl px-4 py-1.5 text-sm transition ${
               active
-                ? "bg-emerald-500 text-emerald-950"
-                : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                ? "btn-primary-gradient font-semibold shadow-lg shadow-cyan-500/20"
+                : "text-white/60 hover:bg-white/5 hover:text-white"
             }`}
           >
             {PRESET_LABEL[p] ?? p}

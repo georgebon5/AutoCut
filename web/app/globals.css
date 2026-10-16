@@ -4,7 +4,51 @@
 
 html,
 body {
-  background: #0b0b0e;
   color: #e5e7eb;
   min-height: 100vh;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Deep near-black backdrop with two soft radial glows: cyan top-left, violet
+   bottom-right. The result reads as "dark but alive" without competing with
+   content. ``background-attachment: fixed`` keeps it stable while scrolling. */
+body {
+  background-color: #07070b;
+  background-image:
+    radial-gradient(1200px 600px at 10% -10%, rgba(34, 211, 238, 0.08), transparent 60%),
+    radial-gradient(900px 500px at 95% 110%, rgba(167, 139, 250, 0.08), transparent 55%),
+    radial-gradient(600px 400px at 50% 50%, rgba(255, 255, 255, 0.02), transparent 70%);
+  background-attachment: fixed;
+}
+
+@layer utilities {
+  /* Glass card: translucent fill + soft hairline border + layered backdrop
+     blur. Lives on top of the body gradient for the "futuristic" feel. */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  /* Primary action gradient — cyan → violet → fuchsia. Darkens slightly on
+     hover without changing hue so the identity stays constant. */
+  .btn-primary-gradient {
+    background-image: linear-gradient(
+      135deg, #22d3ee 0%, #818cf8 55%, #e879f9 100%
+    );
+    color: #0b0b15;
+  }
+  .btn-primary-gradient:hover:not(:disabled) {
+    filter: brightness(1.08) saturate(1.05);
+  }
+
+  /* Subtle inner-glow for featured borders. */
+  .ring-glow {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 10px 40px -10px rgba(34, 211, 238, 0.25);
+  }
 }

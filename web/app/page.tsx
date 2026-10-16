@@ -23,27 +23,34 @@ export default function HomePage() {
   });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 px-4 py-14">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">AutoCut</h1>
+        <div>
+          <h1 className="bg-gradient-to-br from-white to-white/60 bg-clip-text text-3xl font-light tracking-tight text-transparent">
+            AutoCut
+          </h1>
+          <p className="mt-1 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+            Rough-cut studio
+          </p>
+        </div>
         <HealthBadge status={health.data?.status} version={health.data?.version} />
       </header>
 
       <Link
         href="/upload"
-        className="rounded-lg bg-emerald-500 px-4 py-3 text-center text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
+        className="btn-primary-gradient rounded-2xl px-5 py-4 text-center text-sm font-semibold tracking-wide shadow-xl shadow-cyan-500/15 transition"
       >
         + Ανέβασε clips
       </Link>
 
       <section>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-gray-400">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
           Jobs
         </h2>
         {jobs.isLoading ? (
-          <p className="text-sm text-gray-500">Φόρτωση…</p>
+          <p className="text-sm text-white/40">Φόρτωση…</p>
         ) : jobs.isError ? (
-          <p className="text-sm text-red-400">
+          <p className="text-sm text-red-300">
             Δεν φορτώθηκαν τα jobs. Τρέχει το API;
           </p>
         ) : jobs.data && jobs.data.length > 0 ? (
@@ -53,7 +60,7 @@ export default function HomePage() {
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-white/40">
             Κανένα job ακόμα. Πάτα “Ανέβασε clips” για να ξεκινήσεις.
           </p>
         )}
@@ -66,10 +73,17 @@ function HealthBadge({ status, version }: { status?: string; version?: string })
   const ok = status === "ok";
   return (
     <span
-      className={`rounded-full px-3 py-1 text-xs font-medium ${
-        ok ? "bg-emerald-500/15 text-emerald-300" : "bg-gray-500/15 text-gray-400"
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium tracking-wide ${
+        ok
+          ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-200/90"
+          : "border-white/10 bg-white/5 text-white/40"
       }`}
     >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          ok ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-white/30"
+        }`}
+      />
       {ok ? `API v${version ?? "?"}` : "API εκτός"}
     </span>
   );
@@ -88,13 +102,13 @@ function JobRow({ job }: { job: Job }) {
   const canDelete = job.status === "done" || job.status === "failed";
 
   const inner = (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 transition hover:border-gray-700">
+    <div className="glass-card rounded-2xl p-5 transition hover:border-white/15 hover:bg-white/[0.05]">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium" title={job.id}>
-            {job.id.slice(0, 8)}…
+          <p className="truncate font-mono text-sm tracking-tight text-white/90" title={job.id}>
+            {job.id.slice(0, 8)}<span className="text-white/30">…</span>
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="mt-0.5 text-xs text-white/40">
             {job.stage} · {new Date(job.created_at).toLocaleString()}
           </p>
         </div>
@@ -112,19 +126,21 @@ function JobRow({ job }: { job: Job }) {
           ) : null}
         </div>
       </div>
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+      <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-white/5">
         <div
-          className={`h-full ${
-            job.status === "failed" ? "bg-red-500" : "bg-emerald-500"
+          className={`h-full transition-all duration-500 ${
+            job.status === "failed"
+              ? "bg-gradient-to-r from-red-500 to-rose-400"
+              : "bg-gradient-to-r from-cyan-400 via-indigo-400 to-fuchsia-400"
           }`}
           style={{ width: `${pct}%` }}
         />
       </div>
       {job.error ? (
-        <p className="mt-2 text-xs text-red-400">{job.error}</p>
+        <p className="mt-3 text-xs text-red-300/90">{job.error}</p>
       ) : null}
       {removeMut.isError ? (
-        <p className="mt-2 text-xs text-red-400">
+        <p className="mt-3 text-xs text-red-300/90">
           {(removeMut.error as ApiError | Error).message}
         </p>
       ) : null}
@@ -209,13 +225,13 @@ function MlBadge() {
 
 function StatusChip({ status }: { status: Job["status"] }) {
   const colors: Record<Job["status"], string> = {
-    pending: "bg-gray-500/15 text-gray-300",
-    running: "bg-sky-500/15 text-sky-300",
-    done: "bg-emerald-500/15 text-emerald-300",
-    failed: "bg-red-500/15 text-red-300",
+    pending: "border-white/10 bg-white/5 text-white/60",
+    running: "border-cyan-400/20 bg-cyan-400/5 text-cyan-200/90",
+    done: "border-emerald-400/20 bg-emerald-400/5 text-emerald-200/90",
+    failed: "border-red-400/20 bg-red-400/5 text-red-200/90",
   };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs ${colors[status]}`}>
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] tracking-wide ${colors[status]}`}>
       {STATUS_LABEL[status]}
     </span>
   );

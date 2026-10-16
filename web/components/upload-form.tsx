@@ -126,15 +126,20 @@ export default function UploadForm() {
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="w-full rounded-lg border border-dashed border-gray-700 px-4 py-6 text-center text-sm text-gray-300 transition hover:border-gray-500 hover:text-white"
+          className="group relative w-full overflow-hidden rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-10 text-center text-sm text-white/70 transition hover:border-cyan-400/40 hover:bg-white/[0.04] hover:text-white"
         >
-          Πάτα για να διαλέξεις βίντεο
+          <span className="relative z-10 font-light tracking-wide">
+            Πάτα για να διαλέξεις βίντεο
+          </span>
+          <span className="pointer-events-none absolute inset-0 opacity-0 transition group-hover:opacity-100" style={{
+            background: "radial-gradient(400px circle at var(--x,50%) var(--y,50%), rgba(34,211,238,0.08), transparent 60%)",
+          }} />
         </button>
       </div>
 
       {items.length > 0 ? (
         <>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-white/50">
             Η σειρά παρακάτω είναι αυτή που θα μπουν στο τελικό cut.
             Σύρε με τα βελάκια για αναδιάταξη (π.χ. πρωί → μεσημέρι → απόγευμα).
           </p>
@@ -156,19 +161,19 @@ export default function UploadForm() {
       ) : null}
 
       <fieldset
-        className="flex flex-col gap-3 rounded-lg border border-gray-800 p-4"
+        className="glass-card flex flex-col gap-4 rounded-2xl p-5"
         disabled={!canCreateJob}
       >
-        <legend className="px-1 text-xs uppercase tracking-wide text-gray-400">
+        <legend className="px-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/40">
           Επιλογές
         </legend>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-gray-300">Διάρκεια</span>
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-white/60">Διάρκεια</span>
           <select
             value={preset}
             onChange={(e) => setPreset(e.target.value as JobConfig["preset"])}
-            className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm"
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
           >
             {PRESETS.map((p) => (
               <option key={p.value} value={p.value}>
@@ -193,14 +198,14 @@ export default function UploadForm() {
       </fieldset>
 
       {jobError ? (
-        <p className="text-sm text-red-400">{jobError}</p>
+        <p className="text-sm text-red-300/90">{jobError}</p>
       ) : null}
 
       <button
         type="button"
         onClick={handleCreateJob}
         disabled={!canCreateJob}
-        className="rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
+        className="btn-primary-gradient rounded-2xl px-5 py-4 text-sm font-semibold tracking-wide shadow-xl shadow-cyan-500/15 transition disabled:cursor-not-allowed disabled:bg-none disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none"
       >
         {creatingJob
           ? "Ξεκινάει…"
@@ -236,24 +241,24 @@ function UploadItemRow({
         : "bg-sky-500";
 
   return (
-    <li className="flex items-stretch gap-2 rounded-md border border-gray-800 bg-gray-900/60 p-3">
-      <div className="flex w-6 shrink-0 items-center justify-center text-xs font-semibold text-gray-500">
-        {index + 1}
+    <li className="glass-card flex items-stretch gap-3 rounded-2xl p-3">
+      <div className="flex w-7 shrink-0 items-center justify-center font-mono text-xs text-white/40">
+        {String(index + 1).padStart(2, "0")}
       </div>
       <div className="flex min-w-0 flex-1 flex-col justify-center">
         <div className="flex items-center justify-between gap-2 text-sm">
-          <span className="truncate font-medium" title={item.file.name}>
+          <span className="truncate font-medium text-white/90" title={item.file.name}>
             {item.file.name}
           </span>
-          <span className="shrink-0 text-xs text-gray-400">
+          <span className="shrink-0 text-xs text-white/40">
             {formatBytes(item.file.size)} · {labelFor(item.state)}
           </span>
         </div>
-        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-gray-800">
-          <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/5">
+          <div className={`h-full ${barColor} transition-all duration-300`} style={{ width: `${pct}%` }} />
         </div>
         {item.error ? (
-          <p className="mt-2 text-xs text-red-400">{item.error}</p>
+          <p className="mt-2 text-xs text-red-300/90">{item.error}</p>
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col items-center justify-center gap-1">
@@ -263,7 +268,7 @@ function UploadItemRow({
           type="button"
           aria-label="Αφαίρεση"
           onClick={onRemove}
-          className="rounded-md px-1.5 py-0.5 text-xs text-gray-500 transition hover:text-red-400"
+          className="rounded-md px-1.5 py-0.5 text-xs text-white/40 transition hover:text-red-300"
         >
           ×
         </button>
@@ -289,7 +294,7 @@ function OrderButton({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="rounded-md border border-gray-700 bg-gray-800 px-1.5 py-0.5 text-xs text-gray-300 transition hover:border-gray-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+      className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-white/70 transition hover:border-cyan-400/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
     >
       {symbol}
     </button>

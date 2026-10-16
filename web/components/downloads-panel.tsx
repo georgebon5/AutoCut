@@ -26,16 +26,16 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const videos = (outputsQ.data?.outputs ?? []).filter((o) => o.kind === "video");
 
   return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
         Κατέβασμα βίντεο
       </h2>
 
-      <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
+      <div className="glass-card rounded-2xl p-4">
         {outputsQ.isLoading ? (
-          <p className="text-sm text-gray-500">Φόρτωση…</p>
+          <p className="text-sm text-white/40">Φόρτωση…</p>
         ) : videos.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-white/40">
             Δεν έχει βγει τίποτα ακόμα. Πάτα “Ξαναφτιάξε βίντεο” πιο πάνω.
           </p>
         ) : (
@@ -57,17 +57,17 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
 
 function OutputRow({ file, href }: { file: OutputFile; href: string }) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-md border border-gray-800 bg-gray-950/40 px-3 py-2">
+    <li className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/30 px-3 py-2.5">
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-gray-200" title={file.name}>
+        <p className="truncate font-mono text-sm text-white/80" title={file.name}>
           {file.name}
         </p>
-        <p className="text-xs text-gray-500">{formatBytes(file.size)}</p>
+        <p className="text-[11px] text-white/40">{formatBytes(file.size)}</p>
       </div>
       <a
         href={href}
         download={file.name}
-        className="shrink-0 rounded-md bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25"
+        className="shrink-0 rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/20"
       >
         Κατέβασμα
       </a>

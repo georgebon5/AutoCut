@@ -27,25 +27,55 @@ interface Props {
   disabled?: boolean;
 }
 
+function ColorField({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+      <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-full border border-white/15">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 h-10 w-10 cursor-pointer -translate-x-1 -translate-y-1 appearance-none border-0 bg-transparent"
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs text-white/70">{label}</div>
+        {hint ? <div className="truncate text-[11px] text-white/40">{hint}</div> : null}
+      </div>
+      <div className="font-mono text-[11px] uppercase text-white/50">{value}</div>
+    </div>
+  );
+}
+
 export default function CaptionStylePicker({ value, onChange, disabled }: Props) {
   const patch = (p: Partial<CaptionStyle>) => onChange({ ...value, ...p });
 
   return (
     <fieldset
-      className="flex flex-col gap-3 rounded-md border border-gray-800 bg-gray-900/60 p-3 text-sm"
+      className="flex flex-col gap-4 rounded-xl border border-white/10 bg-black/20 p-4 text-sm"
       disabled={disabled}
     >
-      <legend className="px-1 text-xs uppercase tracking-wide text-gray-400">
+      <legend className="px-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/40">
         Στυλ υποτίτλων
       </legend>
 
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-gray-400">Γραμματοσειρά</span>
+      <div className="grid grid-cols-2 gap-4">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wider text-white/40">Γραμματοσειρά</span>
           <select
             value={value.font ?? ""}
             onChange={(e) => patch({ font: e.target.value || undefined })}
-            className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5"
+            className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
           >
             <option value="">Προεπιλογή</option>
             {FONTS.map((f) => (
@@ -56,8 +86,8 @@ export default function CaptionStylePicker({ value, onChange, disabled }: Props)
           </select>
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-gray-400">Μέγεθος</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] uppercase tracking-wider text-white/40">Μέγεθος</span>
           <input
             type="number"
             min={20}
@@ -69,49 +99,35 @@ export default function CaptionStylePicker({ value, onChange, disabled }: Props)
               const n = parseInt(e.target.value, 10);
               patch({ size: Number.isFinite(n) ? n : undefined });
             }}
-            className="rounded-md border border-gray-700 bg-gray-900 px-2 py-1.5"
+            className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
           />
         </label>
 
-        <label className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">Χρώμα γραμμάτων</span>
-          <input
-            type="color"
-            value={value.text_color ?? "#ffffff"}
-            onChange={(e) => patch({ text_color: e.target.value })}
-            className="h-7 w-10 cursor-pointer rounded border border-gray-700 bg-transparent"
-          />
-        </label>
-
-        <label className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">Χρώμα περιγράμματος</span>
-          <input
-            type="color"
-            value={value.outline_color ?? "#000000"}
-            onChange={(e) => patch({ outline_color: e.target.value })}
-            className="h-7 w-10 cursor-pointer rounded border border-gray-700 bg-transparent"
-          />
-        </label>
-
-        <label className="col-span-2 flex items-center gap-2">
-          <span className="text-xs text-gray-400">
-            Χρώμα ενεργής λέξης
-            <span className="ml-1 text-[10px] text-gray-500">
-              (ανάβει λέξη-λέξη καθώς τη λες)
-            </span>
-          </span>
-          <input
-            type="color"
+        <ColorField
+          label="Γραμμάτων"
+          hint="Το κύριο χρώμα των υποτίτλων"
+          value={value.text_color ?? "#ffffff"}
+          onChange={(c) => patch({ text_color: c })}
+        />
+        <ColorField
+          label="Περιγράμματος"
+          hint="Για να διαβάζονται σε φωτεινά φόντα"
+          value={value.outline_color ?? "#000000"}
+          onChange={(c) => patch({ outline_color: c })}
+        />
+        <div className="col-span-2">
+          <ColorField
+            label="Ενεργής λέξης"
+            hint="Ανάβει λέξη-λέξη καθώς τη λες (karaoke highlight)"
             value={value.highlight_color ?? "#ffff00"}
-            onChange={(e) => patch({ highlight_color: e.target.value })}
-            className="h-7 w-10 cursor-pointer rounded border border-gray-700 bg-transparent"
+            onChange={(c) => patch({ highlight_color: c })}
           />
-        </label>
+        </div>
       </div>
 
-      <label className="flex items-center gap-2">
-        <span className="text-xs text-gray-400">Θέση</span>
-        <div className="flex gap-1">
+      <label className="flex items-center gap-3">
+        <span className="text-[11px] uppercase tracking-wider text-white/40">Θέση</span>
+        <div className="inline-flex gap-1 rounded-xl border border-white/10 bg-black/30 p-0.5">
           {POSITIONS.map((p) => {
             const active = (value.position ?? "bottom") === p.value;
             return (
@@ -119,10 +135,10 @@ export default function CaptionStylePicker({ value, onChange, disabled }: Props)
                 key={p.value}
                 type="button"
                 onClick={() => patch({ position: p.value })}
-                className={`rounded-md px-2 py-1 text-xs transition ${
+                className={`rounded-lg px-3 py-1 text-xs transition ${
                   active
-                    ? "bg-emerald-500 text-emerald-950"
-                    : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                    ? "btn-primary-gradient font-semibold"
+                    : "text-white/60 hover:bg-white/5 hover:text-white"
                 }`}
               >
                 {p.label}

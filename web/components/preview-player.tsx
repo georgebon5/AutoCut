@@ -36,25 +36,25 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
-        Προεπισκόπηση · {videoName}
+      <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+        Προεπισκόπηση · <span className="font-mono text-white/60">{videoName}</span>
       </h2>
-      <div className="relative">
+      <div className="relative overflow-hidden rounded-2xl ring-glow">
         <video
           key={src}            /* force reload on cache-key change */
           controls
           playsInline
           preload="metadata"
-          className={`w-full rounded-lg border border-gray-800 bg-black transition ${
-            rendering ? "opacity-40" : ""
+          className={`w-full bg-black transition duration-300 ${
+            rendering ? "opacity-30 blur-sm" : ""
           }`}
           src={src}
         />
         {rendering ? (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/40 text-center text-sm text-amber-200">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-amber-300 border-t-transparent" />
-            <div className="font-medium">Φτιάχνει το νέο βίντεο…</div>
-            <div className="text-xs text-amber-200/80">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 text-center text-sm text-cyan-100 backdrop-blur-sm">
+            <div className="h-7 w-7 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
+            <div className="font-medium tracking-wide">Φτιάχνει το νέο βίντεο…</div>
+            <div className="text-xs text-cyan-100/60">
               Αυτό που βλέπεις είναι η προηγούμενη έκδοση.
             </div>
           </div>
@@ -81,7 +81,7 @@ function pickVideo(outputs: OutputFile[], preset: string | undefined): string | 
 
 function PlayerSkeleton({ label }: { label: string }) {
   return (
-    <div className="flex aspect-video items-center justify-center rounded-lg border border-gray-800 bg-gray-900/60 text-sm text-gray-500">
+    <div className="glass-card flex aspect-video items-center justify-center rounded-2xl text-sm text-white/40">
       {label}
     </div>
   );

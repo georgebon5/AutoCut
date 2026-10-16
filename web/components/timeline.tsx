@@ -45,8 +45,8 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
     <section className="flex flex-col gap-4">
       <StatsBar stats={stats} />
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800 bg-gray-950">
-        <div className="flex min-w-full flex-col divide-y divide-gray-800">
+      <div className="glass-card overflow-x-auto rounded-2xl">
+        <div className="flex min-w-full flex-col divide-y divide-white/5">
           {edl.clips.map((clip) => (
             <ClipRow
               key={clip.clip_id}
@@ -72,7 +72,7 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
       {selectedSeg ? (
         <SegmentDetail index={selected!} seg={selectedSeg} />
       ) : (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-white/40">
           Πάτα ένα κομμάτι για να το κρατήσεις ή να το κόψεις.
         </p>
       )}
@@ -98,11 +98,11 @@ function ClipRow({
 
   return (
     <div className="flex gap-3 px-3 py-3">
-      <div className="w-24 shrink-0 text-xs text-gray-400">
-        <div className="truncate font-medium text-gray-200" title={clip.clip_id}>
+      <div className="w-24 shrink-0 text-xs text-white/50">
+        <div className="truncate font-mono text-white/80" title={clip.clip_id}>
           {clip.clip_id}
         </div>
-        <div>{clip.duration.toFixed(1)}s</div>
+        <div className="font-mono text-white/40">{clip.duration.toFixed(1)}s</div>
       </div>
       <div
         className="relative"
@@ -128,11 +128,11 @@ function ClipRow({
               style={{ left, width: w, height: ROW_HEIGHT_PX }}
               title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · ${seg.decision}`}
               className={[
-                "absolute top-0 rounded border transition",
+                "absolute top-0 rounded-md border transition duration-200",
                 keep
-                  ? "bg-emerald-500/40 border-emerald-400 hover:bg-emerald-500/60"
-                  : "border-dashed border-gray-600 bg-gray-800/40 hover:bg-gray-700/60",
-                active ? "ring-2 ring-sky-400" : "",
+                  ? "border-cyan-400/60 bg-cyan-400/30 hover:bg-cyan-400/50"
+                  : "border-dashed border-white/15 bg-white/[0.03] hover:bg-white/10",
+                active ? "ring-2 ring-fuchsia-400/70" : "",
               ].join(" ")}
             />
           );
@@ -145,30 +145,30 @@ function ClipRow({
 
 function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 text-sm">
+    <div className="glass-card rounded-2xl p-4 text-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-gray-200">
-          Κομμάτι #{index} · {seg.clip_id}
+        <span className="font-medium text-white/90">
+          Κομμάτι <span className="font-mono text-white/50">#{index}</span> · <span className="font-mono text-white/60">{seg.clip_id}</span>
         </span>
         <span
-          className={`rounded-full px-2 py-0.5 text-xs ${
+          className={`rounded-full border px-2 py-0.5 text-xs ${
             seg.decision === "keep"
-              ? "bg-emerald-500/20 text-emerald-300"
-              : "bg-gray-700/50 text-gray-300"
+              ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
+              : "border-white/10 bg-white/5 text-white/60"
           }`}
         >
           {seg.decision === "keep" ? "μέσα" : "έξω"} · {seg.decision_source === "user" ? "εσύ" : "αυτόματο"}
         </span>
       </div>
-      <div className="mt-2 text-xs text-gray-400">
+      <div className="mt-2 font-mono text-xs text-white/50">
         {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s · βαθμός {seg.interest_score.toFixed(2)}
       </div>
       {seg.reasons.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-2 text-xs">
+        <ul className="mt-3 flex flex-wrap gap-1.5 text-xs">
           {seg.reasons.map((r, i) => (
             <li
               key={i}
-              className="rounded bg-gray-800 px-2 py-0.5 text-gray-300"
+              className="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-white/70"
             >
               {r}
             </li>
@@ -189,14 +189,14 @@ function StatsBar({
   const totalSec = stats.keepSec + stats.cutSec;
   const pct = totalSec > 0 ? Math.round((stats.keepSec / totalSec) * 100) : 0;
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-      <span className="text-gray-200">
+    <div className="flex flex-wrap items-center gap-3 text-xs text-white/50">
+      <span className="font-medium text-white/80">
         {stats.keep} μέσα · {stats.cut} έξω
       </span>
-      <span>
+      <span className="font-mono">
         {stats.keepSec.toFixed(1)}s από {totalSec.toFixed(1)}s ({pct}%)
       </span>
-      <span className="text-gray-500">· {total} κομμάτια σύνολο</span>
+      <span className="text-white/35">· {total} κομμάτια σύνολο</span>
     </div>
   );
 }

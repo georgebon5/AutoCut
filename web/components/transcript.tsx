@@ -113,13 +113,13 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-400">
+        <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
           {headerHint}
         </h2>
         <ModeToggle value={mode} onChange={(m) => { setMode(m); setEditing(null); }} />
       </div>
 
-      <div className="flex max-h-80 flex-col gap-4 overflow-y-auto rounded-lg border border-gray-800 bg-gray-950 p-4">
+      <div className="glass-card flex max-h-80 flex-col gap-4 overflow-y-auto rounded-2xl p-5">
         {edl.transcripts.map((t) => (
           <ClipTranscript
             key={t.clip_id}
@@ -164,12 +164,14 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
 
 function ModeToggle({ value, onChange }: { value: Mode; onChange: (m: Mode) => void }) {
   return (
-    <div className="flex shrink-0 rounded-md border border-gray-700 bg-gray-900 text-xs">
+    <div className="inline-flex shrink-0 gap-1 rounded-xl border border-white/10 bg-black/30 p-0.5 text-xs">
       <button
         type="button"
         onClick={() => onChange("toggle")}
-        className={`rounded-l-md px-2 py-1 transition ${
-          value === "toggle" ? "bg-emerald-500 text-emerald-950" : "text-gray-300 hover:text-white"
+        className={`rounded-lg px-3 py-1 transition ${
+          value === "toggle"
+            ? "btn-primary-gradient font-semibold"
+            : "text-white/60 hover:bg-white/5 hover:text-white"
         }`}
       >
         Κόψιμο
@@ -177,8 +179,10 @@ function ModeToggle({ value, onChange }: { value: Mode; onChange: (m: Mode) => v
       <button
         type="button"
         onClick={() => onChange("edit")}
-        className={`rounded-r-md px-2 py-1 transition ${
-          value === "edit" ? "bg-sky-500 text-sky-950" : "text-gray-300 hover:text-white"
+        className={`rounded-lg px-3 py-1 transition ${
+          value === "edit"
+            ? "bg-cyan-400 font-semibold text-cyan-950"
+            : "text-white/60 hover:bg-white/5 hover:text-white"
         }`}
       >
         Διόρθωση κειμένου
@@ -215,7 +219,7 @@ function ClipTranscript({
 
   return (
     <div>
-      <div className="mb-1 text-xs text-gray-500">
+      <div className="mb-1 font-mono text-xs text-white/35">
         {transcript.clip_id} · {transcript.language}
       </div>
       <p className="text-sm leading-relaxed">
@@ -253,10 +257,10 @@ function ClipTranscript({
               className={[
                 "inline rounded px-0.5 transition",
                 keep
-                  ? "text-gray-100 hover:bg-emerald-500/20"
-                  : "text-gray-500 line-through hover:bg-gray-700/60",
-                active ? "ring-1 ring-sky-400" : "",
-                mode === "edit" ? "cursor-text hover:bg-sky-500/20" : "",
+                  ? "text-white/90 hover:bg-cyan-400/15"
+                  : "text-white/35 line-through hover:bg-white/5",
+                active ? "ring-1 ring-fuchsia-400/70" : "",
+                mode === "edit" ? "cursor-text hover:bg-cyan-400/20" : "",
               ].join(" ")}
             >
               {a.word.word.trim()}
@@ -303,7 +307,7 @@ function WordEditor({
         }
       }}
       onBlur={() => onCommit(value)}
-      className="inline rounded border border-sky-400 bg-gray-900 px-1 text-sm text-sky-100 outline-none"
+      className="inline rounded-md border border-cyan-400/60 bg-black/60 px-1.5 text-sm text-cyan-100 outline-none"
     />
   );
 }
