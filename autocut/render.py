@@ -154,6 +154,27 @@ def _build_render_cmd(
     return cmd
 
 
+def _has_subtitles_filter() -> bool:
+    """True iff the installed ffmpeg was built with libass (filter available).
+
+    Some Homebrew builds (9.x HEAD etc.) ship without libass and omit the
+    ``subtitles`` filter entirely. Detecting that up front lets us raise an
+    actionable error instead of a 3-KB ffmpeg traceback.
+    """
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-filters"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "subtitles":
+            return True
+    return False
+
+
 def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> None:
     """Overlay an ASS/SRT subtitle file onto ``input_mp4`` → ``output_mp4``.
 
@@ -161,6 +182,14 @@ def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> N
     audio) and so burning is opt-in without complicating the main filter graph.
     Audio is stream-copied; only the video gets re-encoded by libass.
     """
+    if not _has_subtitles_filter():
+        raise RenderError(
+            "Your ffmpeg was built without libass, so burn-in subtitles aren't "
+            "available. Reinstall with `brew reinstall ffmpeg` (macOS) or "
+            "install a build that includes --enable-libass. The SRT/ASS files "
+            "in the Downloads panel still work for NLE import."
+        )
+
     # ffmpeg's `subtitles` filter parses its arg as filter-graph syntax: ':'
     # separates options and '\' is an escape, so an absolute path on darwin
     # ("/Users/...") or a Windows drive letter trips the parser. Running ffmpeg
