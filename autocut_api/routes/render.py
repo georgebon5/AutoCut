@@ -18,7 +18,7 @@ from autocut_api.dependencies import get_db
 from autocut_api.pipeline_bridge import rerender_from_edl
 from autocut_api.routes.edl import edl_filename, get_done_job, resolve_edl_path
 from autocut_api.routes.jobs import _job_response
-from autocut_api.schemas import JobResponse
+from autocut_api.schemas import JobResponse, RenderRequest
 
 router = APIRouter(prefix="/jobs", tags=["render"])
 
@@ -47,6 +47,7 @@ def post_render(
     request: Request,
     preset: str | None = Query(default=None),
     burn_subtitles: bool = Query(default=False),
+    body: RenderRequest | None = None,
     session: Session = Depends(get_db),
 ) -> JobResponse:
     job = get_done_job(session, job_id)
@@ -65,9 +66,15 @@ def post_render(
     runner = request.app.state.runner
     session_factory = request.app.state.session_factory
     burn = burn_subtitles
+    style = (
+        body.caption_style.model_dump(exclude_none=True)
+        if body and body.caption_style
+        else None
+    )
     runner.submit(lambda: rerender_from_edl(
         job_id, workspace, edl_path, output_name, session_factory,
         burn_subtitles_flag=burn,
+        caption_style=style,
     ))
 
     # Return the current (freshly re-fetched) job snapshot so the client sees

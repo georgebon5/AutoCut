@@ -176,3 +176,11 @@ export interface OverrideRecord {
 export interface OverridesListResponse {
   overrides: OverrideRecord[];
 }
+
+export interface CaptionStyle {
+  font?: string;
+  size?: number;
+  text_color?: string;      // "#RRGGBB"
+  outline_color?: string;   // "#RRGGBB"
+  position?: "top" | "middle" | "bottom";
+}

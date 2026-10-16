@@ -106,6 +106,41 @@ _ASS_PLAY_RES: dict[str, tuple[int, int]] = {
     "default": (1920, 1080),
 }
 
+
+# ASS alignment keypad codes (numpad layout): 1-3 bottom, 4-6 middle, 7-9 top;
+# the middle column (2, 5, 8) is horizontally centred.
+_ALIGNMENTS = {"bottom": 2, "middle": 5, "top": 8}
+
+
+def _hex_to_ass_color(hex_rgb: str) -> str:
+    """Convert '#RRGGBB' (HTML) to '&H00BBGGRR' (ASS ABGR, fully opaque)."""
+    s = hex_rgb.lstrip("#")
+    if len(s) != 6:
+        raise ValueError(f"expected #RRGGBB, got {hex_rgb!r}")
+    r, g, b = s[0:2], s[2:4], s[4:6]
+    return f"&H00{b}{g}{r}".upper()
+
+
+def _render_style_def(
+    *,
+    name: str,
+    font: str,
+    size: int,
+    primary_color: str,     # ASS format "&H00BBGGRR"
+    outline_color: str,
+    secondary_color: str = "&H0000FFFF",   # karaoke highlight (yellow default)
+    bold: int = -1,         # -1 = true, 0 = false
+    outline_width: int = 4,
+    alignment: int = 2,     # ASS keypad alignment
+    margin_v: int = 80,
+) -> str:
+    """Format one ASS style line from parts."""
+    return (
+        f"Style: {name},{font},{size},"
+        f"{primary_color},{secondary_color},{outline_color},&H00000000,"
+        f"{bold},0,0,0,100,100,0,0,1,{outline_width},0,{alignment},20,20,{margin_v},1"
+    )
+
 _ASS_HEADER_TMPL = """\
 [Script Info]
 ScriptType: v4.00+
@@ -133,11 +168,42 @@ def _karaoke_text(group: list[WordTimestamp], line_start: float) -> str:
     return " ".join(parts)
 
 
-def _build_ass(groups: list[list[WordTimestamp]], style: str = "tiktok") -> str:
-    """Return a complete ASS file as a string."""
+def _build_ass(
+    groups: list[list[WordTimestamp]],
+    style: str = "tiktok",
+    overrides: dict | None = None,
+) -> str:
+    """Return a complete ASS file as a string.
+
+    ``overrides`` lets the caller tweak font/size/colors/position without
+    changing the preset — used by the review-time style picker in the UI.
+    Accepted keys: font, size, text_color, outline_color, position
+    ("top"|"middle"|"bottom"). All optional.
+    """
     style_def = _ASS_STYLE_DEFS.get(style, _ASS_STYLE_DEFS["default"])
     style_name = style_def.split(",", 1)[0].removeprefix("Style: ")
     w, h = _ASS_PLAY_RES.get(style, _ASS_PLAY_RES["default"])
+
+    if overrides:
+        # Pull preset defaults so unset override fields stay consistent with
+        # the preset's look (font weight, karaoke colour, outline width).
+        base_parts = style_def.removeprefix("Style: ").split(",")
+        base_font, base_size = base_parts[1], int(base_parts[2])
+        base_primary, base_outline = base_parts[3], base_parts[5]
+        style_def = _render_style_def(
+            name=style_name,
+            font=overrides.get("font") or base_font,
+            size=int(overrides.get("size") or base_size),
+            primary_color=(
+                _hex_to_ass_color(overrides["text_color"])
+                if overrides.get("text_color") else base_primary
+            ),
+            outline_color=(
+                _hex_to_ass_color(overrides["outline_color"])
+                if overrides.get("outline_color") else base_outline
+            ),
+            alignment=_ALIGNMENTS.get(overrides.get("position") or "", 2),
+        )
 
     header = _ASS_HEADER_TMPL.format(w=w, h=h, style_def=style_def)
     events: list[str] = []
@@ -207,6 +273,7 @@ def write_cut_captions(
     output_dir: Path,
     stem: str,
     clip_order: dict[str, int],
+    style_overrides: dict | None = None,
 ) -> dict[str, Path]:
     """Write captions whose timestamps match the rendered rough cut.
 
@@ -230,7 +297,10 @@ def write_cut_captions(
         written["srt"] = srt_path
     if "ass" in cfg.formats:
         ass_path = output_dir / f"{stem}.ass"
-        ass_path.write_text(_build_ass(groups, style=cfg.style), encoding="utf-8")
+        ass_path.write_text(
+            _build_ass(groups, style=cfg.style, overrides=style_overrides),
+            encoding="utf-8",
+        )
         written["ass"] = ass_path
     return written
 

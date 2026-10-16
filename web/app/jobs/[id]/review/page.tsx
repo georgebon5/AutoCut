@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import CaptionStylePicker from "@/components/caption-style-picker";
 import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
 import { ApiError, getEdl, getJob, postRender } from "@/lib/api";
-import type { Job, JobConfig } from "@/lib/api.types";
+import type { CaptionStyle, Job, JobConfig } from "@/lib/api.types";
 
 const PRESET_OPTIONS: JobConfig["preset"][] = ["tight", "medium", "loose"];
 
@@ -41,6 +42,7 @@ export default function ReviewPage() {
   // output stays clean for NLE import; user opts in when they want a
   // standalone video with hard-coded captions.
   const [burnSubs, setBurnSubs] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({});
   // "dirty" = user toggled a segment since the last render. The preview mp4
   // reflects the previous render only; we gate on this to tell the user when
   // their edits aren't visible yet.
@@ -69,7 +71,10 @@ export default function ReviewPage() {
 
   const renderMut = useMutation({
     mutationFn: () =>
-      postRender(jobId, edlPreset ?? undefined, { burnSubtitles: burnSubs }),
+      postRender(jobId, edlPreset ?? undefined, {
+        burnSubtitles: burnSubs,
+        captionStyle: burnSubs ? captionStyle : undefined,
+      }),
     onSuccess: () => {
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["job", jobId] });
@@ -176,23 +181,34 @@ export default function ReviewPage() {
             cacheKey={job.updated_at}
             rendering={rendering}
           />
-          <label className="flex items-center gap-2 text-sm text-gray-300">
-            <input
-              type="checkbox"
-              checked={burnSubs}
-              onChange={(e) => {
-                setBurnSubs(e.target.checked);
-                setDirty(true);
-              }}
-              className="h-4 w-4 accent-sky-500"
-            />
-            <span>
-              Υπότιτλοι μέσα στο βίντεο
-              <span className="ml-1 text-xs text-gray-500">
-                (μόνο για τις λέξεις που κρατάς· χρειάζεται re-render)
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={burnSubs}
+                onChange={(e) => {
+                  setBurnSubs(e.target.checked);
+                  setDirty(true);
+                }}
+                className="h-4 w-4 accent-sky-500"
+              />
+              <span>
+                Υπότιτλοι μέσα στο βίντεο
+                <span className="ml-1 text-xs text-gray-500">
+                  (μόνο για τις λέξεις που κρατάς· χρειάζεται re-render)
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+            {burnSubs ? (
+              <CaptionStylePicker
+                value={captionStyle}
+                onChange={(next) => {
+                  setCaptionStyle(next);
+                  setDirty(true);
+                }}
+              />
+            ) : null}
+          </div>
           <Timeline
             jobId={jobId}
             preset={edlPreset ?? undefined}

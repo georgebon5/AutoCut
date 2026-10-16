@@ -5,6 +5,7 @@
 // matter of changing AUTOCUT_API_URL — the frontend code stays identical.
 
 import type {
+  CaptionStyle,
   ChunkAck,
   CompleteUploadResponse,
   CreateUploadRequest,
@@ -161,13 +162,18 @@ export const outputDownloadUrl = (jobId: string, filename: string) =>
 export const postRender = (
   jobId: string,
   preset?: string,
-  opts?: { burnSubtitles?: boolean },
+  opts?: { burnSubtitles?: boolean; captionStyle?: CaptionStyle },
 ) => {
   const params = new URLSearchParams();
   if (preset) params.set("preset", preset);
   if (opts?.burnSubtitles) params.set("burn_subtitles", "true");
   const q = params.toString() ? `?${params.toString()}` : "";
-  return request<Job>(`/jobs/${jobId}/render${q}`, { method: "POST" });
+  const hasStyle = opts?.captionStyle && Object.keys(opts.captionStyle).length > 0;
+  return request<Job>(`/jobs/${jobId}/render${q}`, {
+    method: "POST",
+    headers: hasStyle ? { "content-type": "application/json" } : undefined,
+    body: hasStyle ? JSON.stringify({ caption_style: opts!.captionStyle }) : undefined,
+  });
 };
 
 // ---------------------------------------------------------------------------

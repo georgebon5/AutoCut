@@ -110,6 +110,7 @@ def rerender_from_edl(
     output_name: str,
     session_factory: sessionmaker,
     burn_subtitles_flag: bool = False,
+    caption_style: dict | None = None,
 ) -> None:
     """Re-render ``output_name`` using the EDL on disk — no re-analysis.
 
@@ -145,6 +146,7 @@ def rerender_from_edl(
             captions_written = write_cut_captions(
                 edl, cfg.captions, workspace,
                 stem=stem, clip_order=clip_order,
+                style_overrides=caption_style,
             )
         # Burn is folded into the main render as a single ffmpeg pass (saves a
         # whole encode vs. doing a second overlay pass). Preflight the libass

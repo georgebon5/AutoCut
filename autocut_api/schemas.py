@@ -133,3 +133,26 @@ class OverrideRecord(BaseModel):
 
 class OverridesListResponse(BaseModel):
     overrides: list[OverrideRecord]
+
+
+class CaptionStyle(BaseModel):
+    """Optional UI-driven overrides for the ASS caption style line.
+
+    Any field left None keeps the preset default. Colors are HTML-style
+    hex (``#RRGGBB``); the pipeline converts them to the ASS ABGR format.
+    """
+    font: str | None = None
+    size: int | None = None
+    text_color: str | None = None     # "#RRGGBB"
+    outline_color: str | None = None  # "#RRGGBB"
+    position: str | None = None       # "top" | "middle" | "bottom"
+
+
+class RenderRequest(BaseModel):
+    """Optional POST body carrying style overrides for a re-render.
+
+    Burn-in and preset still live in the query string so GET-equivalent
+    tooling (curl examples etc.) stays simple. Only the fiddly fields are
+    in the body.
+    """
+    caption_style: CaptionStyle | None = None
