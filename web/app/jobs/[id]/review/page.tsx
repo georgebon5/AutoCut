@@ -12,6 +12,7 @@ import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
 import { ApiError, getEdl, getJob, postRender } from "@/lib/api";
 import type { CaptionStyle, Job, JobConfig } from "@/lib/api.types";
+import { usePersistedState } from "@/lib/use-persisted-state";
 
 const PRESET_OPTIONS: JobConfig["preset"][] = ["tight", "medium", "loose"];
 
@@ -38,11 +39,17 @@ export default function ReviewPage() {
   const qc = useQueryClient();
 
   const [preset, setPreset] = useState<string | null>(null);
-  // Burn subtitles into the mp4 on next render. Off by default so the base
-  // output stays clean for NLE import; user opts in when they want a
-  // standalone video with hard-coded captions.
-  const [burnSubs, setBurnSubs] = useState(false);
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({});
+  // UI preferences are persisted per-job in localStorage so a page reload
+  // (or coming back later) keeps the user's picks around. Keyed by jobId so
+  // different videos remember their own styling. Preset is intentionally
+  // NOT persisted — a persisted "tight" from one job would misroute to a
+  // non-existent EDL on a medium-only job.
+  const [burnSubs, setBurnSubs] = usePersistedState<boolean>(
+    `autocut:${jobId}:burnSubs`, false,
+  );
+  const [captionStyle, setCaptionStyle] = usePersistedState<CaptionStyle>(
+    `autocut:${jobId}:captionStyle`, {},
+  );
   // "dirty" = user toggled a segment since the last render. The preview mp4
   // reflects the previous render only; we gate on this to tell the user when
   // their edits aren't visible yet.
