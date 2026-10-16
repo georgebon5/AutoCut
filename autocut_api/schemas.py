@@ -143,9 +143,10 @@ class CaptionStyle(BaseModel):
     """
     font: str | None = None
     size: int | None = None
-    text_color: str | None = None     # "#RRGGBB"
-    outline_color: str | None = None  # "#RRGGBB"
-    position: str | None = None       # "top" | "middle" | "bottom"
+    text_color: str | None = None       # "#RRGGBB"
+    outline_color: str | None = None    # "#RRGGBB"
+    highlight_color: str | None = None  # "#RRGGBB" — karaoke per-word colour
+    position: str | None = None         # "top" | "middle" | "bottom"
 
 
 class RenderRequest(BaseModel):

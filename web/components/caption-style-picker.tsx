@@ -92,6 +92,21 @@ export default function CaptionStylePicker({ value, onChange, disabled }: Props)
             className="h-7 w-10 cursor-pointer rounded border border-gray-700 bg-transparent"
           />
         </label>
+
+        <label className="col-span-2 flex items-center gap-2">
+          <span className="text-xs text-gray-400">
+            Χρώμα ενεργής λέξης
+            <span className="ml-1 text-[10px] text-gray-500">
+              (ανάβει λέξη-λέξη καθώς τη λες)
+            </span>
+          </span>
+          <input
+            type="color"
+            value={value.highlight_color ?? "#ffff00"}
+            onChange={(e) => patch({ highlight_color: e.target.value })}
+            className="h-7 w-10 cursor-pointer rounded border border-gray-700 bg-transparent"
+          />
+        </label>
       </div>
 
       <label className="flex items-center gap-2">

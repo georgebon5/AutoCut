@@ -189,7 +189,8 @@ def _build_ass(
         # the preset's look (font weight, karaoke colour, outline width).
         base_parts = style_def.removeprefix("Style: ").split(",")
         base_font, base_size = base_parts[1], int(base_parts[2])
-        base_primary, base_outline = base_parts[3], base_parts[5]
+        base_primary, base_secondary = base_parts[3], base_parts[4]
+        base_outline = base_parts[5]
         style_def = _render_style_def(
             name=style_name,
             font=overrides.get("font") or base_font,
@@ -197,6 +198,10 @@ def _build_ass(
             primary_color=(
                 _hex_to_ass_color(overrides["text_color"])
                 if overrides.get("text_color") else base_primary
+            ),
+            secondary_color=(
+                _hex_to_ass_color(overrides["highlight_color"])
+                if overrides.get("highlight_color") else base_secondary
             ),
             outline_color=(
                 _hex_to_ass_color(overrides["outline_color"])

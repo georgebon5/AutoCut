@@ -180,7 +180,8 @@ export interface OverridesListResponse {
 export interface CaptionStyle {
   font?: string;
   size?: number;
-  text_color?: string;      // "#RRGGBB"
-  outline_color?: string;   // "#RRGGBB"
+  text_color?: string;       // "#RRGGBB"
+  outline_color?: string;    // "#RRGGBB"
+  highlight_color?: string;  // "#RRGGBB" — karaoke per-word colour
   position?: "top" | "middle" | "bottom";
 }
