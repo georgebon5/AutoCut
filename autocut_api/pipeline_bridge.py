@@ -142,6 +142,9 @@ def rerender_from_edl(
             output_name=output_name,
             hook=edl.hook,
             zoom=cfg.zoom,
+            # Re-renders are review previews, not final deliverables — use
+            # the hardware encoder when available to cut encode time by ~3-5x.
+            fast_preview=True,
         )
         # Regenerate captions so they reflect both segment keep/cut changes
         # AND any word-text corrections the user made via PATCH .../words/N.

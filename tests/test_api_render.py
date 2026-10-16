@@ -107,11 +107,11 @@ def stub_render(monkeypatch):
     calls: list[dict] = []
 
     def _fake_render(proxies, segments, output_dir, cfg, output_name="rough_cut.mp4",
-                     hook=None, zoom=None):
+                     hook=None, zoom=None, fast_preview=False):
         calls.append({
             "proxies": proxies, "segments": list(segments),
             "output_dir": output_dir, "output_name": output_name,
-            "hook": hook, "zoom": zoom,
+            "hook": hook, "zoom": zoom, "fast_preview": fast_preview,
         })
         out = Path(output_dir) / output_name
         out.write_bytes(b"fake-mp4-body")

@@ -67,6 +67,7 @@ def _build_render_cmd(
     kept: list[_RenderSegment],
     output_path: Path,
     cfg: RenderConfig,
+    fast_preview: bool = False,
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -143,15 +144,54 @@ def _build_render_cmd(
             current = label
         audio_out = "[aout]"
 
+    # Pick the video codec. In fast_preview mode (used for re-renders during
+    # review) we lean on Apple's hardware H.264 encoder — 3-5x faster than
+    # libx264 at CRF 18 and plenty of quality for a scrubbing preview. The
+    # final export is driven by FCPXML into the NLE anyway, so the preview
+    # mp4 doesn't need archival quality.
+    if fast_preview and _supports_videotoolbox():
+        video_codec_args = [
+            "-c:v", "h264_videotoolbox",
+            "-b:v", "6M",
+            "-realtime", "1",
+        ]
+    else:
+        video_codec_args = [
+            "-c:v", "libx264",
+            "-crf", str(cfg.crf),
+            "-preset", cfg.preset,
+        ]
+
     cmd += [
         "-filter_complex", ";".join(filters),
         "-map", video_out,
         "-map", audio_out,
-        "-c:v", "libx264", "-crf", str(cfg.crf), "-preset", cfg.preset,
+        *video_codec_args,
         "-c:a", "aac", "-b:a", "128k",
         str(output_path),
     ]
     return cmd
+
+
+# Cache the videotoolbox probe — ffmpeg startup to list encoders is ~100ms;
+# re-renders fire often during review so this adds up.
+_videotoolbox_cache: bool | None = None
+
+
+def _supports_videotoolbox() -> bool:
+    global _videotoolbox_cache
+    if _videotoolbox_cache is not None:
+        return _videotoolbox_cache
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        _videotoolbox_cache = False
+        return False
+    _videotoolbox_cache = "h264_videotoolbox" in result.stdout
+    return _videotoolbox_cache
 
 
 def _has_subtitles_filter() -> bool:
@@ -196,10 +236,18 @@ def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> N
     # from the subtitles file's directory and passing just the filename
     # sidesteps all of that — the filename contains no filter metachars.
     workdir = subtitles_path.parent.resolve()
+    # Match the fast_preview codec choice from _build_render_cmd: HW encoder
+    # on Mac, libx264 fallback elsewhere. This pass is already a review-time
+    # convenience; running it 5x slower on libx264 defeats the purpose.
+    if _supports_videotoolbox():
+        codec_args = ["-c:v", "h264_videotoolbox", "-b:v", "6M", "-realtime", "1"]
+    else:
+        codec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_mp4.resolve()),
         "-vf", f"subtitles={subtitles_path.name}",
+        *codec_args,
         "-c:a", "copy",
         str(output_mp4.resolve()),
     ]
@@ -218,6 +266,7 @@ def render(
     output_name: str = "rough_cut.mp4",
     hook: Segment | None = None,
     zoom: ZoomConfig | None = None,
+    fast_preview: bool = False,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -289,6 +338,6 @@ def render(
     if hook is not None:
         kept_render.insert(0, _to_render_segment(hook, allow_zoom=False))
 
-    cmd = _build_render_cmd(kept_render, output_path, cfg)
+    cmd = _build_render_cmd(kept_render, output_path, cfg, fast_preview=fast_preview)
     _run(cmd)
     return output_path
