@@ -161,23 +161,24 @@ def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> N
     audio) and so burning is opt-in without complicating the main filter graph.
     Audio is stream-copied; only the video gets re-encoded by libass.
     """
-    # The `subtitles` filter parses the arg as a filter expression, which
-    # treats ':' and '\' as syntax chars. Escape both so absolute paths on
-    # darwin ("/Users/...") work; single quotes get escaped for the filter.
-    sub_arg = (
-        str(subtitles_path)
-        .replace("\\", r"\\\\")
-        .replace(":", r"\:")
-        .replace("'", r"\'")
-    )
+    # ffmpeg's `subtitles` filter parses its arg as filter-graph syntax: ':'
+    # separates options and '\' is an escape, so an absolute path on darwin
+    # ("/Users/...") or a Windows drive letter trips the parser. Running ffmpeg
+    # from the subtitles file's directory and passing just the filename
+    # sidesteps all of that — the filename contains no filter metachars.
+    workdir = subtitles_path.parent.resolve()
     cmd = [
         "ffmpeg", "-y",
-        "-i", str(input_mp4),
-        "-vf", f"subtitles='{sub_arg}'",
+        "-i", str(input_mp4.resolve()),
+        "-vf", f"subtitles={subtitles_path.name}",
         "-c:a", "copy",
-        str(output_mp4),
+        str(output_mp4.resolve()),
     ]
-    _run(cmd)
+    result = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RenderError(
+            f"ffmpeg burn-subtitles failed:\n{result.stderr[-3000:]}"
+        )
 
 
 def render(

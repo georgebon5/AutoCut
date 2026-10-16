@@ -166,12 +166,17 @@ def rerender_from_edl(
             finally:
                 tmp_mp4.unlink(missing_ok=True)
         update_job(session_factory, job_id,
-                   status="done", stage="complete", progress=1.0)
+                   status="done", stage="complete", progress=1.0, error=None)
     except RenderError as e:
+        # Re-render failure must NOT turn the job to "failed" — the initial
+        # outputs are still on disk and valid. Keep the job usable (status
+        # stays "done") so the user can tweak settings and try again.
+        log.warning("re-render failed for job %s: %s", job_id, e)
         update_job(session_factory, job_id,
-                   status="failed", stage="error", error=f"render failed: {e}")
+                   status="done", stage="complete", progress=1.0,
+                   error=f"re-render failed: {e}")
     except Exception as e:   # noqa: BLE001
         log.exception("re-render crashed for job %s", job_id)
         update_job(session_factory, job_id,
-                   status="failed", stage="error",
-                   error=f"{type(e).__name__}: {e}")
+                   status="done", stage="complete", progress=1.0,
+                   error=f"re-render crashed: {type(e).__name__}: {e}")

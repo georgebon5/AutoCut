@@ -122,6 +122,18 @@ export default function ReviewPage() {
         </p>
       ) : null}
 
+      {/* Backend render errors (background job) land on job.error even when
+          status is "done" — surface them so the user sees why the last
+          re-render didn't apply. */}
+      {job?.error && !rendering ? (
+        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+          <div className="font-medium">Αποτυχία τελευταίας εφαρμογής αλλαγών</div>
+          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-xs text-red-200/80">
+            {job.error}
+          </pre>
+        </div>
+      ) : null}
+
       {isAll ? (
         <PresetPicker value={preset} onChange={setPreset} />
       ) : null}

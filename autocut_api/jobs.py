@@ -21,6 +21,9 @@ from autocut_api.models import Job
 PipelineFn = Callable[[str, Path, Sequence[Path], sessionmaker], None]
 
 
+_UNSET: object = object()
+
+
 def update_job(
     session_factory: sessionmaker,
     job_id: str,
@@ -28,9 +31,14 @@ def update_job(
     status: str | None = None,
     stage: str | None = None,
     progress: float | None = None,
-    error: str | None = None,
+    error: str | None | object = _UNSET,
 ) -> None:
-    """Atomic field update on a Job row. No-op if the job was deleted."""
+    """Atomic field update on a Job row. No-op if the job was deleted.
+
+    ``error`` uses a sentinel so callers can distinguish "leave it alone"
+    (omit the kwarg) from "clear it" (pass ``error=None``). Needed so a
+    successful re-render can wipe the error from a previous failed one.
+    """
     with session_factory() as session:
         job = session.get(Job, job_id)
         if job is None:
@@ -41,8 +49,8 @@ def update_job(
             job.stage = stage
         if progress is not None:
             job.progress = progress
-        if error is not None:
-            job.error = error
+        if error is not _UNSET:
+            job.error = error   # type: ignore[assignment]
         session.commit()
 
 
