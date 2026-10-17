@@ -17,10 +17,13 @@ render:
   preset: fast
 
 transcribe:
-  model_size: small
+  # tiny + beam=1: aggressive speed, enough accuracy to detect fillers ("εε",
+  # "λοιπόν") and repeated takes. Caption text is lower quality — fine if the
+  # user does light manual edits via the review UI word-edit mode.
+  model_size: tiny
   language: el
   compute_type: int8
-  beam_size: 5
+  beam_size: 1
 
 fillers:
   min_isolation_ms: 200
