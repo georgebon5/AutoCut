@@ -16,7 +16,36 @@ from sqlalchemy.orm import sessionmaker
 
 from autocut.captions import write_cut_captions
 from autocut.config import load_config
-from autocut.edl import load_edl
+from autocut.edl import load_edl, save_edl
+from autocut.models import RenderChunk, Segment
+
+
+def _compute_chunks(
+    segments: list[Segment],
+    hook: Segment | None,
+    clip_order: dict[str, int],
+) -> list[RenderChunk]:
+    """Rebuild the output-time map that mirrors ``render()``'s ordering.
+
+    Hook first (if any), then kept segments sorted by (clip_order, start) —
+    identical to the real render path, so output offsets stay in sync with
+    the mp4 the frontend plays back.
+    """
+    chunks: list[RenderChunk] = []
+    cursor = 0.0
+    if hook is not None:
+        d = hook.end - hook.start
+        chunks.append(RenderChunk(segment_index=-1, output_start=0.0, output_end=d))
+        cursor = d
+    kept = [(i, s) for i, s in enumerate(segments) if s.decision == "keep" and s.duration > 1e-3]
+    kept.sort(key=lambda t: (clip_order.get(t[1].clip_id, 0), t[1].start))
+    for idx, s in kept:
+        d = s.duration
+        chunks.append(RenderChunk(
+            segment_index=idx, output_start=cursor, output_end=cursor + d,
+        ))
+        cursor += d
+    return chunks
 from autocut.pipeline import (
     PipelineError,
     PipelineOptions,
@@ -136,13 +165,17 @@ def rerender_from_edl(
             cfg.zoom.enabled = True
 
         edl = load_edl(edl_path)
+        # Recompute the output-time chunk map for the new keep/cut layout and
+        # write it back on the EDL so the frontend can drive instant preview
+        # skipping without waiting for another re-render.
+        clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
+        edl.render_chunks = _compute_chunks(edl.segments, edl.hook, clip_order)
         # Regenerate captions first — they're derived from the EDL, so they
         # don't need the rendered mp4; and when burning subs we need the ASS
         # file to exist before ffmpeg starts.
         stem = output_name.removesuffix(".mp4")
         captions_written: dict[str, Path] = {}
         if any(t.words for t in edl.transcripts):
-            clip_order = {c.clip_id: i for i, c in enumerate(edl.clips)}
             captions_written = write_cut_captions(
                 edl, cfg.captions, workspace,
                 stem=stem, clip_order=clip_order,
@@ -175,6 +208,8 @@ def rerender_from_edl(
             fast_preview=True,
             subtitles_path=subtitles_path,
         )
+        # Persist the recomputed chunk map so the next EDL fetch carries it.
+        save_edl(edl, edl_path)
         update_job(session_factory, job_id,
                    status="done", stage="complete", progress=1.0,
                    error=burn_error)

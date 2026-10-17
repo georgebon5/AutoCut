@@ -190,6 +190,7 @@ export default function ReviewPage() {
             preset={edlPreset ?? undefined}
             cacheKey={job.updated_at}
             rendering={rendering}
+            edl={edlQuery.data}
           />
           <div className="glass-card flex flex-col gap-4 rounded-2xl p-4">
             <label className="flex items-center gap-3 text-sm text-white/80">

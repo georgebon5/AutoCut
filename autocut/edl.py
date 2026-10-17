@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from autocut.models import EDL, ProxyInfo, Segment, Transcript, WordTimestamp
+from autocut.models import EDL, ProxyInfo, RenderChunk, Segment, Transcript, WordTimestamp
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +91,14 @@ def _transcript_from_dict(d: dict) -> Transcript:
     )
 
 
+def _chunk_from_dict(d: dict) -> RenderChunk:
+    return RenderChunk(
+        segment_index=d["segment_index"],
+        output_start=d["output_start"],
+        output_end=d["output_end"],
+    )
+
+
 def edl_from_dict(data: dict) -> EDL:
     hook_raw = data.get("hook")
     return EDL(
@@ -98,6 +106,7 @@ def edl_from_dict(data: dict) -> EDL:
         segments=[_segment_from_dict(s) for s in data["segments"]],
         transcripts=[_transcript_from_dict(t) for t in data.get("transcripts", [])],
         hook=_segment_from_dict(hook_raw) if hook_raw else None,
+        render_chunks=[_chunk_from_dict(c) for c in data.get("render_chunks", [])],
         created_at=datetime.fromisoformat(data["created_at"]),
         version=data.get("version", "1.0"),
     )

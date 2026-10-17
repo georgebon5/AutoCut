@@ -25,7 +25,7 @@ from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.hook import find_hook_segment
 from autocut.ingest import IngestError, ingest_clips
 from autocut.keywords import enrich_segments_keywords
-from autocut.models import ProxyInfo, Segment, SpeechRegion, Transcript
+from autocut.models import ProxyInfo, RenderChunk, Segment, SpeechRegion, Transcript
 from autocut.motion import enrich_segments_motion
 from autocut.render import RenderError, render
 from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
@@ -305,6 +305,34 @@ def run_pipeline(
 
     clip_order = {p.clip_id: i for i, p in enumerate(proxies)}
 
+    def _compute_render_chunks(
+        segs: list[Segment],
+        hook: Segment | None,
+        clip_order: dict[str, int],
+    ) -> list[RenderChunk]:
+        """Replay render's segment ordering to produce the output-time map.
+
+        Mirrors ``render()`` exactly: hook first (if any), then kept segments
+        sorted by (clip_order, start). Each contributes its own duration to a
+        running output offset. Hook uses segment_index=-1 since it isn't in
+        ``edl.segments``.
+        """
+        chunks: list[RenderChunk] = []
+        cursor = 0.0
+        if hook is not None:
+            d = hook.end - hook.start
+            chunks.append(RenderChunk(segment_index=-1, output_start=0.0, output_end=d))
+            cursor = d
+        kept = [(i, s) for i, s in enumerate(segs) if s.decision == "keep" and s.duration > 1e-3]
+        kept.sort(key=lambda t: (clip_order.get(t[1].clip_id, 0), t[1].start))
+        for idx, s in kept:
+            d = s.duration
+            chunks.append(RenderChunk(
+                segment_index=idx, output_start=cursor, output_end=cursor + d,
+            ))
+            cursor += d
+        return chunks
+
     def _render_pass(segs: list[Segment], stem: str) -> None:
         video_name = f"{stem}.mp4"
         edl_name = f"edl{stem.removeprefix('rough_cut')}.json"
@@ -318,9 +346,11 @@ def run_pipeline(
         outputs.append(out_mp4)
         rep.info(f"wrote {out_mp4.name}")
 
+        chunks = _compute_render_chunks(segs, hook_seg, clip_order)
         edl = EDL(
             clips=proxies, segments=segs,
             transcripts=list(all_transcripts.values()), hook=hook_seg,
+            render_chunks=chunks,
         )
         edl_path = output_dir / edl_name
         save_edl(edl, edl_path)

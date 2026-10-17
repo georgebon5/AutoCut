@@ -110,11 +110,20 @@ export interface Transcript {
   words: WordTimestamp[];
 }
 
+export interface RenderChunk {
+  /** Index into `edl.segments`, or -1 for the opening hook. */
+  segment_index: number;
+  /** Seconds from the start of the rendered mp4. */
+  output_start: number;
+  output_end: number;
+}
+
 export interface Edl {
   clips: Clip[];
   segments: SegmentDict[];
   transcripts: Transcript[];
   hook: SegmentDict | null;
+  render_chunks: RenderChunk[];
   created_at: string;
   version: string;
 }

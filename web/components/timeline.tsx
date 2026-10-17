@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
@@ -41,6 +41,51 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
 
+  // Keyboard shortcuts for high-volume editing. Skip when the user is typing
+  // in an input/button/link so word-edits and buttons keep their keystrokes.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t && (
+          t.tagName === "INPUT"
+          || t.tagName === "TEXTAREA"
+          || t.tagName === "SELECT"
+          || t.tagName === "BUTTON"
+          || t.tagName === "A"
+          || t.isContentEditable
+        )
+      ) return;
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+
+      const total = edl.segments.length;
+      if (total === 0) return;
+
+      // j/k navigate; d/x/Delete/Backspace toggle keep/cut of current.
+      if (e.key === "j" || e.key === "J" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
+      } else if (e.key === "l" || e.key === "L" || e.key === "ArrowRight") {
+        e.preventDefault();
+        setSelected((s) => (s === null ? 0 : Math.min(total - 1, s + 1)));
+      } else if (
+        e.key === "d" || e.key === "D"
+        || e.key === "x" || e.key === "X"
+        || e.key === "Delete" || e.key === "Backspace"
+      ) {
+        if (selected === null) return;
+        const seg = edl.segments[selected];
+        if (!seg) return;
+        e.preventDefault();
+        const next: Decision = seg.decision === "keep" ? "cut" : "keep";
+        toggleMut.mutate({ index: selected, decision: next });
+        onDirty?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [edl.segments, selected, toggleMut, onDirty]);
+
   return (
     <section className="flex flex-col gap-4">
       <StatsBar stats={stats} />
@@ -76,6 +121,13 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
           Πάτα ένα κομμάτι για να το κρατήσεις ή να το κόψεις.
         </p>
       )}
+
+      <p className="text-[11px] text-white/35">
+        Shortcuts: <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">J</kbd>
+        /<kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">L</kbd> προηγούμενο/επόμενο ·{" "}
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">D</kbd> κόψε/κράτα ·{" "}
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> play/pause
+      </p>
     </section>
   );
 }

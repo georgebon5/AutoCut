@@ -72,10 +72,26 @@ class Transcript:
 
 
 @dataclass
+class RenderChunk:
+    """Maps one rendered segment back to its position in the output mp4.
+
+    ``segment_index`` is the index into ``EDL.segments`` of the source
+    segment, or ``-1`` for the opening hook (which lives on ``EDL.hook`` and
+    isn't in ``segments``). The frontend uses these to drive instant preview
+    skipping: toggle a segment to "cut" and the player can seek past the
+    corresponding ``[output_start, output_end]`` without a re-render.
+    """
+    segment_index: int
+    output_start: float    # seconds from the start of the rendered mp4
+    output_end: float
+
+
+@dataclass
 class EDL:
     clips: list[ProxyInfo]
     segments: list[Segment]
     transcripts: list[Transcript] = field(default_factory=list)
     hook: Optional[Segment] = None
+    render_chunks: list[RenderChunk] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0"

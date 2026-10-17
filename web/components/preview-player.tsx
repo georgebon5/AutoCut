@@ -1,10 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { listOutputs, outputDownloadUrl } from "@/lib/api";
-import type { OutputFile } from "@/lib/api.types";
+import type { Edl, OutputFile, RenderChunk } from "@/lib/api.types";
 
 
 interface Props {
@@ -14,9 +14,11 @@ interface Props {
   cacheKey: string;
   /** True while the backend is re-rendering; preview is stale until it finishes. */
   rendering?: boolean;
+  /** Current EDL — drives live preview skipping without re-render. */
+  edl?: Edl;
 }
 
-export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false }: Props) {
+export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false, edl }: Props) {
   const outputsQ = useQuery({
     queryKey: ["outputs", jobId, cacheKey],
     queryFn: () => listOutputs(jobId),
@@ -35,6 +37,29 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
   // the user hits "Re-render"; ApiError isn't possible here (static URL).
   const src = `${outputDownloadUrl(jobId, videoName)}?v=${encodeURIComponent(cacheKey)}`;
 
+  // Chunks whose underlying segment is now "cut" — the player will skip
+  // past these during playback so the user sees their edits immediately
+  // without waiting for a re-render.
+  const cutChunks = useMemo(() => {
+    if (!edl) return [];
+    return edl.render_chunks.filter((c) => {
+      if (c.segment_index < 0) return false;   // hook stays
+      const seg = edl.segments[c.segment_index];
+      return seg?.decision === "cut";
+    });
+  }, [edl]);
+  // Count of segments the user marked "keep" that aren't in the rendered
+  // mp4 — the preview can't magic those in; a real re-render is needed.
+  const pendingAdds = useMemo(() => {
+    if (!edl) return 0;
+    const rendered = new Set(
+      edl.render_chunks.map((c) => c.segment_index).filter((i) => i >= 0),
+    );
+    return edl.segments.filter(
+      (s, i) => s.decision === "keep" && !rendered.has(i),
+    ).length;
+  }, [edl]);
+
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
@@ -44,6 +69,7 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
         <VideoWithSpaceToggle
           src={src}
           rendering={rendering}
+          cutChunks={cutChunks}
         />
         {rendering ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 text-center text-sm text-cyan-100 backdrop-blur-sm">
@@ -55,6 +81,12 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
           </div>
         ) : null}
       </div>
+      {pendingAdds > 0 ? (
+        <p className="text-xs text-amber-200/80">
+          {pendingAdds} segment{pendingAdds === 1 ? "" : "s"} που ξανά-επέλεξες δεν φαίνονται ακόμη —
+          πάτα «Ξαναφτιάξε βίντεο» για να μπουν στο preview.
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -93,11 +125,17 @@ function PlayerSkeleton({ label }: { label: string }) {
 function VideoWithSpaceToggle({
   src,
   rendering,
+  cutChunks,
 }: {
   src: string;
   rendering: boolean;
+  cutChunks: RenderChunk[];
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Keep the latest cutChunks in a ref so the timeupdate handler always sees
+  // the current set — attaching a new listener on every change would churn.
+  const cutRef = useRef<RenderChunk[]>(cutChunks);
+  useEffect(() => { cutRef.current = cutChunks; }, [cutChunks]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -115,21 +153,34 @@ function VideoWithSpaceToggle({
       ) return;
       const v = videoRef.current;
       if (!v) return;
-      // Guard: don't play if the user isn't actually looking at this page.
-      // bfcache / background tabs / scrolled-away previews would otherwise
-      // start audio out of nowhere when the user hits Space elsewhere.
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       if (typeof document !== "undefined" && !document.hasFocus()) return;
       const rect = v.getBoundingClientRect();
       const inView = rect.bottom > 0 && rect.top < window.innerHeight;
       if (!inView) return;
-      e.preventDefault();   // stop page from scrolling
+      e.preventDefault();
       if (v.paused) void v.play();
       else v.pause();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Live-skip "cut" chunks. On every timeupdate, if the playhead is inside a
+  // chunk whose segment is now cut, jump to that chunk's end. ~250ms update
+  // rate is enough to be imperceptible; a tiny 0.001s nudge past the end
+  // avoids re-landing in the same chunk due to float rounding.
+  const onTimeUpdate = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    const now = v.currentTime;
+    for (const c of cutRef.current) {
+      if (now >= c.output_start && now < c.output_end) {
+        v.currentTime = c.output_end + 0.001;
+        return;
+      }
+    }
+  };
 
   return (
     <video
@@ -138,6 +189,7 @@ function VideoWithSpaceToggle({
       controls
       playsInline
       preload="metadata"
+      onTimeUpdate={onTimeUpdate}
       className={`w-full bg-black transition duration-300 ${
         rendering ? "opacity-30 blur-sm" : ""
       }`}
