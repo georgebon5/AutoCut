@@ -84,11 +84,32 @@ def _build_proxy(src: Path, dst: Path, target_fps: int) -> None:
     `format=yuv420p` in the filtergraph handles 10-bit / HDR input correctly
     (straight bit-depth reduction — fine for analysis proxies).
     VFR is resolved by the fps filter which drops/dupes frames as needed.
+
+    The proxy is used ONLY for pipeline analysis (frame diff, zoom crop) and
+    for the final render. Archival quality isn't needed — speed is. On Mac
+    we use the hardware encoder; elsewhere we drop to libx264 ultrafast.
     """
+    # Deferred import keeps render.py free of circular imports if it ever
+    # starts to depend on anything in ingest.
+    from autocut.render import _supports_videotoolbox
+    if _supports_videotoolbox():
+        codec_args = [
+            "-c:v", "h264_videotoolbox",
+            "-b:v", "4M",
+            "-prio_speed", "1",
+            "-allow_sw", "0",
+            "-realtime", "1",
+        ]
+    else:
+        codec_args = [
+            "-c:v", "libx264",
+            "-crf", "23",
+            "-preset", "ultrafast",
+        ]
     _run([
         "ffmpeg", "-y", "-i", str(src),
         "-vf", f"fps={target_fps},format=yuv420p",
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        *codec_args,
         "-an",
         str(dst),
     ])
