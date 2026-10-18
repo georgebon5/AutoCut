@@ -98,32 +98,25 @@ def transcribe_clip(
         return Transcript(clip_id=clip_id, language=cfg.language, words=[])
 
     audio = _load_audio(audio_path)
-    sr = 16000
-    all_words: list[WordTimestamp] = []
-    detected_language = cfg.language
 
-    for region in sorted(speech_regions, key=lambda r: r.start):
-        start_i = int(region.start * sr)
-        end_i = int(region.end * sr)
-        chunk = audio[start_i:end_i]
-
-        if len(chunk) < _MIN_CHUNK_SAMPLES:
-            continue
-
-        # vad_filter=False: we already applied Silero; double-VAD causes
-        # timestamp drift in some faster-whisper versions.
-        segments_iter, info = model.transcribe(
-            chunk,
-            language=cfg.language,
-            word_timestamps=True,
-            beam_size=cfg.beam_size,
-            vad_filter=False,
-        )
-        detected_language = info.language
-        all_words.extend(_collect_words(segments_iter, region.start, clip_id))
+    # Single-pass transcription over the whole audio with Whisper's built-in
+    # VAD gating. Previously we iterated per-region and made one Whisper call
+    # per speech region, paying model-inference setup overhead each time.
+    # faster-whisper's internal vad_filter is CTC-level and cheap; it skips
+    # silence just as effectively while cutting the number of inference
+    # invocations from N→1. Timestamps are already clip-absolute so no
+    # offset bookkeeping needed on our side.
+    segments_iter, info = model.transcribe(
+        audio,
+        language=cfg.language,
+        word_timestamps=True,
+        beam_size=cfg.beam_size,
+        vad_filter=True,
+    )
+    all_words = _collect_words(segments_iter, 0.0, clip_id)
 
     return Transcript(
         clip_id=clip_id,
-        language=detected_language,
+        language=info.language,
         words=sorted(all_words, key=lambda w: w.start),
     )

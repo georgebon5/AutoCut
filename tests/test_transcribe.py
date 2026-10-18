@@ -138,33 +138,40 @@ def test_transcribe_returns_transcript_with_correct_types(tmp_path):
         assert isinstance(w.probability, float)
 
 
-def test_transcribe_offsets_timestamps_by_region_start(tmp_path):
-    """Words returned at 0.05s / 0.40s in chunk must be offset by region.start."""
+def test_transcribe_passes_whole_audio_once(tmp_path):
+    """Single-pass transcribe: Whisper gets the full WAV in one call; it handles
+    silence gating internally via vad_filter. The returned words are reported
+    at clip-absolute timestamps straight from Whisper, no per-region offset."""
     wav_path = write_silence_wav(tmp_path / "a.wav", duration_s=5.0)
-    region_start = 2.0
-    regions = [make_region(region_start, 3.5)]
+    regions = [make_region(2.0, 3.5)]
     t = transcribe_clip(wav_path, regions, "c", default_cfg(), model=FakeWhisperModel())
+    # Fake model returns 2 words at 0.05 / 0.40 (not shifted by region.start).
     assert len(t.words) == 2
-    assert t.words[0].start == pytest.approx(region_start + 0.05, abs=1e-6)
-    assert t.words[1].start == pytest.approx(region_start + 0.40, abs=1e-6)
+    assert t.words[0].start == pytest.approx(0.05, abs=1e-6)
+    assert t.words[1].start == pytest.approx(0.40, abs=1e-6)
 
 
-def test_transcribe_skips_chunk_shorter_than_minimum(tmp_path):
-    """A 0.05s region is below _MIN_CHUNK_SAMPLES and should produce 0 words."""
+def test_transcribe_empty_regions_skips_whisper(tmp_path):
+    """No speech regions = no transcription (clip is treated as B-roll)."""
     wav_path = write_silence_wav(tmp_path / "a.wav", duration_s=1.0)
-    short_region = make_region(0.0, 0.05)   # 800 samples < 1600 minimum
-    t = transcribe_clip(wav_path, [short_region], "c", default_cfg(), model=FakeWhisperModel())
+    t = transcribe_clip(wav_path, [], "c", default_cfg(), model=FakeWhisperModel())
     assert t.words == []
 
 
-def test_transcribe_multiple_regions_all_offset(tmp_path):
+def test_transcribe_multiple_regions_single_pass(tmp_path):
+    """Multiple VAD regions no longer trigger multiple Whisper calls."""
+    calls: list[int] = []
+
+    class CountingFake(FakeWhisperModel):
+        def transcribe(self, audio, **kw):
+            calls.append(len(audio))
+            return super().transcribe(audio, **kw)
+
     wav_path = write_silence_wav(tmp_path / "a.wav", duration_s=8.0)
     regions = [make_region(1.0, 2.5), make_region(4.0, 5.5)]
-    t = transcribe_clip(wav_path, regions, "c", default_cfg(), model=FakeWhisperModel())
-    # 2 words per region → 4 total
-    assert len(t.words) == 4
-    # All words must be in clip-absolute coordinates (>= region starts)
-    assert all(w.start >= 1.0 for w in t.words)
+    t = transcribe_clip(wav_path, regions, "c", default_cfg(), model=CountingFake())
+    assert len(calls) == 1   # single pass, not one call per region
+    assert len(t.words) == 2
 
 
 def test_transcribe_words_sorted_by_start(tmp_path):

@@ -151,13 +151,21 @@ def _build_render_cmd(
         filters.append(f"{video_in}concat=n={N}:v=1:a=0[vconcat]")
         video_pre_subs = "[vconcat]"
 
-        current = "[a0]"
-        for i in range(1, N):
-            label = f"[af{i}]" if i < N - 1 else "[aout]"
-            filters.append(
-                f"{current}[a{i}]acrossfade=d={cf_s:.4f}:c1=tri:c2=tri{label}"
-            )
-            current = label
+        if fast_preview:
+            # Hard-cut audio: concat all tracks with no crossfade. The
+            # chained acrossfade adds non-trivial filter-graph setup for
+            # every pair; for a scrubbing preview the click at each
+            # boundary is unnoticeable.
+            audio_in = "".join(f"[a{i}]" for i in range(N))
+            filters.append(f"{audio_in}concat=n={N}:v=0:a=1[aout]")
+        else:
+            current = "[a0]"
+            for i in range(1, N):
+                label = f"[af{i}]" if i < N - 1 else "[aout]"
+                filters.append(
+                    f"{current}[a{i}]acrossfade=d={cf_s:.4f}:c1=tri:c2=tri{label}"
+                )
+                current = label
         audio_out = "[aout]"
 
     if subtitles_filename:
@@ -172,12 +180,14 @@ def _build_render_cmd(
     # final export is driven by FCPXML into the NLE anyway, so the preview
     # mp4 doesn't need archival quality.
     if fast_preview and _supports_videotoolbox():
-        # `-prio_speed 1` tells VideoToolbox to favour speed over quality,
-        # `-allow_sw 0` keeps us on the HW path (no software fallback), and a
-        # slightly lower bitrate (4M vs 6M) is fine for scrubbing preview.
+        # Preview-grade bitrate: 2.5M at 1080p is enough to spot-check edits
+        # without burning cycles on quality nobody will see — the final cut
+        # lives in the NLE off the FCPXML + original footage anyway. Combined
+        # with `-prio_speed 1` and no-SW fallback this is as fast as the Mac
+        # HW encoder goes for a review scrub.
         video_codec_args = [
             "-c:v", "h264_videotoolbox",
-            "-b:v", "4M",
+            "-b:v", "2500k",
             "-prio_speed", "1",
             "-allow_sw", "0",
             "-realtime", "1",
