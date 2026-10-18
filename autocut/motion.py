@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -80,10 +81,21 @@ def enrich_segments_motion(
     proxy_path: Path,
     sample_fps: float = 5.0,
 ) -> None:
-    """Add motion features to every keep segment in-place."""
-    for seg in segments:
-        if seg.decision != "keep":
-            continue
-        seg.features.update(
-            extract_motion_features(proxy_path, seg, sample_fps=sample_fps)
-        )
+    """Add motion features to every keep segment in-place.
+
+    Each segment opens its own ``cv2.VideoCapture``, which is independent
+    from the others — safe to run in parallel. On M-series Macs this cuts
+    the features stage wall-time roughly linearly with the number of keep
+    segments (up to the thread cap). Capped at 4 workers because each one
+    holds a decoder, and more threads start to thrash OS file caches.
+    """
+    keeps = [s for s in segments if s.decision == "keep"]
+    if not keeps:
+        return
+
+    def _work(seg: Segment) -> tuple[Segment, dict[str, float]]:
+        return seg, extract_motion_features(proxy_path, seg, sample_fps=sample_fps)
+
+    with ThreadPoolExecutor(max_workers=min(4, len(keeps))) as pool:
+        for seg, feats in pool.map(_work, keeps):
+            seg.features.update(feats)

@@ -16,13 +16,24 @@ from autocut.models import SpeechRegion
 _SILERO_REPO = "snakers4/silero-vad"
 _CHUNK_SAMPLES = 512  # Silero's processing window at 16 kHz
 
+# Process-level cache: once Silero is loaded, hand the same instance to every
+# pipeline run so new jobs don't pay the ~1-2s torch.hub + model-init cost
+# each time. Thread-safe for inference (read-only after load).
+_vad_cache: tuple[Any, Any] | None = None
+
 
 def load_vad_model() -> tuple[Any, Any]:
-    """Load Silero VAD model + utils from torch.hub (cached after first download).
+    """Load Silero VAD model + utils from torch.hub.
+
+    First call: downloads/caches via torch.hub. Subsequent calls: returns
+    the already-loaded instance for free.
 
     Returns:
         (model, get_speech_timestamps_fn)
     """
+    global _vad_cache
+    if _vad_cache is not None:
+        return _vad_cache
     model, utils = torch.hub.load(
         _SILERO_REPO,
         "silero_vad",
@@ -30,7 +41,8 @@ def load_vad_model() -> tuple[Any, Any]:
         trust_repo=True,
         verbose=False,
     )
-    return model, utils[0]  # utils[0] is get_speech_timestamps
+    _vad_cache = (model, utils[0])   # utils[0] is get_speech_timestamps
+    return _vad_cache
 
 
 def _load_wav(path: Path, target_sr: int = 16000) -> torch.Tensor:

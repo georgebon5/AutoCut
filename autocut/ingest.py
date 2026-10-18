@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -162,9 +163,12 @@ def ingest_clips(
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     clip_ids = _make_unique_ids(clips)
-    infos: list[ProxyInfo] = []
 
-    for clip, clip_id in zip(clips, clip_ids):
+    # Build each clip's proxy mp4 and audio WAV in parallel. Within a clip,
+    # the video and audio ffmpeg processes also run concurrently — they
+    # share no state and the video pass uses VideoToolbox (GPU) while the
+    # audio pass is CPU-bound, so they don't contend for the same resource.
+    def _ingest_one(clip: Path, clip_id: str) -> ProxyInfo:
         probe = _probe(clip)
         duration, fps, width, height, creation_time, has_audio = _parse_probe(probe)
 
@@ -173,11 +177,18 @@ def ingest_clips(
             audio_dir / f"{clip_id}_audio.wav" if has_audio else None
         )
 
-        _build_proxy(clip, proxy_path, cfg.target_fps)
-        if has_audio and audio_path is not None:
-            _build_audio(clip, audio_path, cfg.audio_sample_rate)
+        with ThreadPoolExecutor(max_workers=2) as inner:
+            fv = inner.submit(_build_proxy, clip, proxy_path, cfg.target_fps)
+            fa = (
+                inner.submit(_build_audio, clip, audio_path, cfg.audio_sample_rate)
+                if has_audio and audio_path is not None
+                else None
+            )
+            fv.result()
+            if fa is not None:
+                fa.result()
 
-        infos.append(ProxyInfo(
+        return ProxyInfo(
             clip_id=clip_id,
             original_path=clip,
             proxy_path=proxy_path,
@@ -187,7 +198,10 @@ def ingest_clips(
             width=width,
             height=height,
             creation_time=creation_time,
-        ))
+        )
+
+    with ThreadPoolExecutor(max_workers=min(4, len(clips))) as pool:
+        infos = list(pool.map(_ingest_one, clips, clip_ids))
 
     infos.sort(key=lambda p: (
         p.creation_time.timestamp() if p.creation_time else 0.0,

@@ -14,15 +14,27 @@ from autocut.models import SpeechRegion, Transcript, WordTimestamp
 # Whisper can hallucinate on very short chunks; skip anything under 0.1 s.
 _MIN_CHUNK_SAMPLES = 1600   # 0.1 s × 16 000 Hz
 
+# Process-level cache keyed by (model_size, compute_type). Loading a Whisper
+# model from disk takes 2-5s; subsequent pipeline runs with the same config
+# reuse the loaded instance for free. faster-whisper is thread-safe for
+# transcribe calls.
+_whisper_cache: dict[tuple[str, str], Any] = {}
+
 
 def load_whisper_model(cfg: TranscribeConfig) -> Any:
-    """Load a faster-whisper model (auto GPU → CPU fallback)."""
+    """Load a faster-whisper model (auto GPU → CPU fallback). Cached per-config."""
+    key = (cfg.model_size, cfg.compute_type)
+    cached = _whisper_cache.get(key)
+    if cached is not None:
+        return cached
     from faster_whisper import WhisperModel
-    return WhisperModel(
+    model = WhisperModel(
         cfg.model_size,
         device="auto",
         compute_type=cfg.compute_type,
     )
+    _whisper_cache[key] = model
+    return model
 
 
 def _load_audio(audio_path: Path, sr: int = 16000) -> np.ndarray:
