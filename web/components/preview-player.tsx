@@ -24,6 +24,27 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
     queryFn: () => listOutputs(jobId),
   });
 
+  // All hooks must run on every render in a stable order — compute these
+  // BEFORE any conditional return below. Otherwise React tracks a different
+  // number of hooks per render and raises "change in the order of Hooks".
+  const cutChunks = useMemo(() => {
+    if (!edl) return [];
+    return edl.render_chunks.filter((c) => {
+      if (c.segment_index < 0) return false;   // hook stays
+      const seg = edl.segments[c.segment_index];
+      return seg?.decision === "cut";
+    });
+  }, [edl]);
+  const pendingAdds = useMemo(() => {
+    if (!edl) return 0;
+    const rendered = new Set(
+      edl.render_chunks.map((c) => c.segment_index).filter((i) => i >= 0),
+    );
+    return edl.segments.filter(
+      (s, i) => s.decision === "keep" && !rendered.has(i),
+    ).length;
+  }, [edl]);
+
   const videoName = pickVideo(outputsQ.data?.outputs ?? [], preset);
 
   if (outputsQ.isLoading) {
@@ -36,29 +57,6 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
   // Cache-bust the download URL so the browser fetches the fresh render after
   // the user hits "Re-render"; ApiError isn't possible here (static URL).
   const src = `${outputDownloadUrl(jobId, videoName)}?v=${encodeURIComponent(cacheKey)}`;
-
-  // Chunks whose underlying segment is now "cut" — the player will skip
-  // past these during playback so the user sees their edits immediately
-  // without waiting for a re-render.
-  const cutChunks = useMemo(() => {
-    if (!edl) return [];
-    return edl.render_chunks.filter((c) => {
-      if (c.segment_index < 0) return false;   // hook stays
-      const seg = edl.segments[c.segment_index];
-      return seg?.decision === "cut";
-    });
-  }, [edl]);
-  // Count of segments the user marked "keep" that aren't in the rendered
-  // mp4 — the preview can't magic those in; a real re-render is needed.
-  const pendingAdds = useMemo(() => {
-    if (!edl) return 0;
-    const rendered = new Set(
-      edl.render_chunks.map((c) => c.segment_index).filter((i) => i >= 0),
-    );
-    return edl.segments.filter(
-      (s, i) => s.decision === "keep" && !rendered.has(i),
-    ).length;
-  }, [edl]);
 
   return (
     <section className="flex flex-col gap-2">
