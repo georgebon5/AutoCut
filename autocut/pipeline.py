@@ -13,6 +13,7 @@ the fakes will be bypassed.
 from __future__ import annotations
 
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -158,40 +159,79 @@ def run_pipeline(
     for p in proxies:
         rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}  {p.fps:.2f}fps")
 
-    # ── 2. VAD ───────────────────────────────────────────────────────────────
+    # ── 2. Parallel analysis: VAD + Whisper + Scenes ─────────────────────────
+    # These three stages all read the same proxy but are otherwise
+    # independent — VAD + Whisper hit the audio WAV read-only, scene detect
+    # shells out to ffmpeg on the video. Running them concurrently in a
+    # thread pool cuts the wall-time of the dominant analysis step from
+    # (vad + whisper + scenes) to max(vad, whisper, scenes).
     rep.stage("vad", _STAGE_PROGRESS["vad"])
     vad_model, get_ts = load_vad_model()
+    whisper = load_whisper_model(cfg.transcribe) if do_transcribe else None
+
     all_regions: dict[str, list[SpeechRegion]] = {}
-    for proxy in proxies:
-        if proxy.audio_path is None:
-            all_regions[proxy.clip_id] = []
-            rep.info(f"{proxy.clip_id}: no audio — treated as B-roll")
-            continue
+    all_transcripts: dict[str, Transcript] = {}
+    scene_boundaries_by_clip: dict[str, list[float]] = {}
+
+    def _run_vad(p: ProxyInfo) -> tuple[str, list[SpeechRegion]]:
+        if p.audio_path is None:
+            return p.clip_id, []
         regions = detect_speech(
-            proxy.audio_path, proxy.clip_id, cfg.vad,
+            p.audio_path, p.clip_id, cfg.vad,
             model=vad_model, get_timestamps=get_ts,
         )
-        all_regions[proxy.clip_id] = regions
-        speech_s = sum(r.end - r.start for r in regions)
-        rep.info(f"{proxy.clip_id}: {len(regions)} speech region(s)  ({speech_s:.1f}s speech)")
+        return p.clip_id, regions
 
-    # ── 3. Transcribe (optional) ─────────────────────────────────────────────
-    all_transcripts: dict[str, Transcript] = {}
-    if do_transcribe:
-        rep.stage("transcribing", _STAGE_PROGRESS["transcribing"])
-        whisper = load_whisper_model(cfg.transcribe)
-        for proxy in proxies:
-            if proxy.audio_path is None:
-                all_transcripts[proxy.clip_id] = Transcript(
-                    clip_id=proxy.clip_id, language=cfg.transcribe.language, words=[],
-                )
-                continue
-            t = transcribe_clip(
-                proxy.audio_path, all_regions[proxy.clip_id], proxy.clip_id,
-                cfg.transcribe, model=whisper,
+    def _run_whisper(p: ProxyInfo, regions: list[SpeechRegion]) -> tuple[str, Transcript]:
+        if p.audio_path is None:
+            return p.clip_id, Transcript(
+                clip_id=p.clip_id, language=cfg.transcribe.language, words=[],
             )
-            all_transcripts[proxy.clip_id] = t
-            rep.info(f"{proxy.clip_id}: {len(t.words)} words [{t.language}]")
+        t = transcribe_clip(
+            p.audio_path, regions, p.clip_id, cfg.transcribe, model=whisper,
+        )
+        return p.clip_id, t
+
+    def _run_scenes(p: ProxyInfo) -> tuple[str, list[float]]:
+        return p.clip_id, detect_scene_boundaries(p.proxy_path, cfg.scenes)
+
+    # Scenes have no dependencies — fire them all upfront. VAD also starts
+    # immediately. Whisper has to wait on its clip's VAD regions (used to
+    # gate the Whisper chunks) so we chain it via a per-clip callback.
+    with ThreadPoolExecutor(max_workers=min(8, max(2, len(proxies) * 3))) as pool:
+        scene_futs = [pool.submit(_run_scenes, p) for p in proxies]
+        vad_futs = [pool.submit(_run_vad, p) for p in proxies]
+        whisper_futs = []
+        if do_transcribe:
+            for p, vfut in zip(proxies, vad_futs):
+                # Submit whisper as soon as its matching VAD finishes.
+                def _after_vad(p: ProxyInfo = p, vfut: Future = vfut) -> tuple[str, Transcript]:
+                    _, regions = vfut.result()
+                    return _run_whisper(p, regions)
+                whisper_futs.append(pool.submit(_after_vad))
+
+        proxies_by_id = {p.clip_id: p for p in proxies}
+        for fut in vad_futs:
+            cid, regions = fut.result()
+            all_regions[cid] = regions
+            if proxies_by_id[cid].audio_path is None:
+                rep.info(f"{cid}: no audio — treated as B-roll")
+                continue
+            speech_s = sum(r.end - r.start for r in regions)
+            rep.info(f"{cid}: {len(regions)} speech region(s)  ({speech_s:.1f}s speech)")
+
+        if do_transcribe:
+            rep.stage("transcribing", _STAGE_PROGRESS["transcribing"])
+            for fut in whisper_futs:
+                cid, t = fut.result()
+                all_transcripts[cid] = t
+                rep.info(f"{cid}: {len(t.words)} words [{t.language}]")
+
+        for fut in scene_futs:
+            cid, bounds = fut.result()
+            scene_boundaries_by_clip[cid] = bounds
+            if bounds:
+                rep.info(f"{cid}: {len(bounds)} scene boundary/-ies")
 
     # ── 4. Fillers (optional) ────────────────────────────────────────────────
     all_filler_cuts: dict[str, list[Segment]] = {p.clip_id: [] for p in proxies}
@@ -267,7 +307,9 @@ def run_pipeline(
             enrich_segments(segs, proxy.audio_path, transcript)
             enrich_segments_motion(segs, proxy.proxy_path)
             enrich_segments_keywords(segs, transcript, cfg.keywords)
-            boundaries = detect_scene_boundaries(proxy.proxy_path, cfg.scenes)
+            # Scene boundaries were pre-computed in parallel with VAD/Whisper
+            # back in step 2 — reuse them so we don't re-scan the video here.
+            boundaries = scene_boundaries_by_clip.get(proxy.clip_id, [])
             enrich_segments_scenes(segs, {proxy.clip_id: boundaries}, cfg.scenes)
             if model is not None:
                 score_segments_with_model(segs, model)
