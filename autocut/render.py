@@ -168,6 +168,18 @@ def _build_render_cmd(
                 current = label
         audio_out = "[aout]"
 
+    # In fast_preview mode, cap the long edge at 720px before anything else
+    # downstream. On 1080p/4K phone footage this ~4-9x fewer pixels for the
+    # encoder to chew through, dominating the end-to-end render time. We
+    # scale BEFORE subtitles so libass renders onto the final-size frame
+    # (text stays sharp instead of being downscaled with the video).
+    if fast_preview:
+        filters.append(
+            f"{video_pre_subs}scale='if(gt(iw,ih),min(iw,720),-2)':"
+            f"'if(gt(iw,ih),-2,min(ih,720))'[vscaled]"
+        )
+        video_pre_subs = "[vscaled]"
+
     if subtitles_filename:
         filters.append(f"{video_pre_subs}subtitles={subtitles_filename}[vout]")
         video_out = "[vout]"
