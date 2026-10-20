@@ -93,9 +93,13 @@ def _load_options(session_factory: sessionmaker, job_id: str) -> PipelineOptions
     data = json.loads(raw) if raw else {}
     model_path_str = data.pop("model_path", None)
     data.pop("model_used", None)
+    voiceover_path_str = data.pop("voiceover_audio_path", None)
+    data.pop("voiceover_mode", None)
     options = PipelineOptions(**data)
     if model_path_str:
         options.model_path = Path(model_path_str)
+    if voiceover_path_str:
+        options.voiceover_audio_path = Path(voiceover_path_str)
     return options
 
 

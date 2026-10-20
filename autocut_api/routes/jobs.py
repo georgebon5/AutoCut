@@ -51,6 +51,9 @@ def _options_to_json(opts: PipelineOptions) -> str:
         # flag the UI reads to show "scored with trained model".
         data["model_path"] = str(opts.model_path)
         data["model_used"] = True
+    if opts.voiceover_audio_path is not None:
+        data["voiceover_audio_path"] = str(opts.voiceover_audio_path)
+        data["voiceover_mode"] = True   # display flag for the review UI
     return json.dumps(data)
 
 
@@ -103,6 +106,22 @@ def create_job(
     resolved = cfg.resolved_model_path
     if resolved.exists():
         options.model_path = resolved
+
+    # Voiceover upload resolution — same lifecycle checks as the clip
+    # uploads: it must exist and be fully uploaded before we start.
+    if body.voiceover_upload_id:
+        vo_up = session.get(Upload, body.voiceover_upload_id)
+        if vo_up is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown voiceover upload {body.voiceover_upload_id}",
+            )
+        if vo_up.status != "complete" or vo_up.final_path is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"voiceover upload {body.voiceover_upload_id} not complete",
+            )
+        options.voiceover_audio_path = Path(vo_up.final_path)
     try:
         validate_options(options)
     except PipelineError as e:

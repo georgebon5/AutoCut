@@ -127,6 +127,28 @@ def _build_audio(src: Path, dst: Path, sample_rate: int) -> None:
     ])
 
 
+def normalize_voiceover(
+    voiceover_path: Path, output_dir: Path, sample_rate: int = 16000,
+) -> tuple[Path, float]:
+    """Transcode a voiceover file (mp3/wav/m4a/etc.) to 16 kHz mono WAV.
+
+    Used in voiceover-vlog mode: the narration file is uploaded separately
+    and needs the same normalisation the clip-audio ingest does so VAD /
+    Whisper see a consistent input. Returns ``(wav_path, duration_s)``.
+    """
+    audio_dir = output_dir / "voiceover"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav_path = audio_dir / "narration.wav"
+    _build_audio(voiceover_path, wav_path, sample_rate)
+    # ffprobe to get exact duration — downstream render needs to trim video.
+    probe = _probe(voiceover_path)
+    try:
+        duration = float(probe["format"]["duration"])
+    except (KeyError, ValueError, TypeError):
+        duration = 0.0
+    return wav_path, duration
+
+
 def _make_unique_ids(clips: list[Path]) -> list[str]:
     """Generate collision-free clip IDs from stems."""
     stems = [p.stem for p in clips]

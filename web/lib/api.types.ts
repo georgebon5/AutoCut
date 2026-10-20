@@ -20,6 +20,10 @@ export interface JobConfig {
   // flag is present only when the trained classifier scored this job.
   model_used?: boolean;
   model_path?: string;
+  // Voiceover-vlog mode: present when a narration file was uploaded with
+  // the clips. The UI uses this to adapt labels (muted B-roll vs talking-
+  // head) in review.
+  voiceover_mode?: boolean;
 }
 
 export interface Job {
@@ -40,6 +44,7 @@ export interface JobCreateRequest {
   hook?: boolean;
   pacing?: boolean;
   zoom?: boolean;
+  voiceover_upload_id?: string;
 }
 
 export interface Upload {

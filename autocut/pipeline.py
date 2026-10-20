@@ -24,11 +24,11 @@ from autocut.edl import EDL, save_edl
 from autocut.features import enrich_segments
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.hook import find_hook_segment
-from autocut.ingest import IngestError, ingest_clips
+from autocut.ingest import IngestError, ingest_clips, normalize_voiceover
 from autocut.keywords import enrich_segments_keywords
 from autocut.models import ProxyInfo, RenderChunk, Segment, SpeechRegion, Transcript
 from autocut.motion import enrich_segments_motion
-from autocut.render import RenderError, render
+from autocut.render import RenderError, render, render_voiceover_vlog
 from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
 from autocut.scoring import score_segments, score_segments_with_model
 from autocut.select import select_segments
@@ -57,6 +57,12 @@ class PipelineOptions:
     # Optional trained LogisticModel to replace the heuristic weights.
     # When set, features must be enabled; validate_options enforces this.
     model_path: Path | None = None
+    # Voiceover-vlog mode: a separately-recorded narration track replaces the
+    # clip audios entirely. The clips become B-roll (visual only, muted) and
+    # the voiceover drives analysis (VAD, Whisper, fillers, captions). The
+    # output's audio IS the voiceover; the output's video is the concatenated
+    # clips, trimmed to the voiceover's post-silence-removal duration.
+    voiceover_audio_path: Path | None = None
 
 
 @dataclass
@@ -149,6 +155,19 @@ def run_pipeline(
     do_takes = do_transcribe and options.takes
     do_captions = do_transcribe and options.captions
     do_features = options.features
+
+    # Voiceover-vlog mode: branch out early. Analysis targets the narration
+    # file instead of the clip audios, and the render path concatenates
+    # muted clips as B-roll under the voiceover audio. The regular code
+    # path below stays unchanged for face-to-camera vlogs.
+    if options.voiceover_audio_path is not None:
+        return _run_voiceover_pipeline(
+            clips, output_dir, cfg, options, rep, t0,
+            do_transcribe=do_transcribe,
+            do_fillers=do_fillers,
+            do_takes=do_takes,
+            do_captions=do_captions,
+        )
 
     # ── 1. Ingest ────────────────────────────────────────────────────────────
     rep.stage("ingesting", _STAGE_PROGRESS["ingesting"])
@@ -430,5 +449,162 @@ def run_pipeline(
         outputs=outputs,
         edls=edls,
         captions=caption_paths,
+        elapsed_s=time.perf_counter() - t0,
+    )
+
+
+_VOICEOVER_CLIP_ID = "voiceover"
+
+
+def _run_voiceover_pipeline(
+    clips: list[Path],
+    output_dir: Path,
+    cfg: AutoCutConfig,
+    options: PipelineOptions,
+    rep: PipelineReporter,
+    t0: float,
+    *,
+    do_transcribe: bool,
+    do_fillers: bool,
+    do_takes: bool,
+    do_captions: bool,
+) -> PipelineResult:
+    """Voiceover-vlog mode: analyse the narration file, render B-roll under it.
+
+    Unlike the regular pipeline, segments live on the voiceover's timeline
+    (not any clip's), motion/scenes/zoom aren't computed (video has no
+    bearing on the cut), and the final mp4 is clip-concat (muted) + the
+    voiceover audio restricted to kept segments.
+    """
+    assert options.voiceover_audio_path is not None
+
+    # ── 1. Ingest clips (needed for the muted B-roll track) + voiceover ──
+    rep.stage("ingesting", _STAGE_PROGRESS["ingesting"])
+    try:
+        proxies = ingest_clips(clips, output_dir, cfg.ingest)
+    except IngestError as e:
+        raise PipelineError(f"ingest failed: {e}") from e
+    for p in proxies:
+        rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}")
+
+    try:
+        vo_wav, vo_duration = normalize_voiceover(
+            options.voiceover_audio_path, output_dir, cfg.ingest.audio_sample_rate,
+        )
+    except Exception as e:   # noqa: BLE001 — ingest sub-step
+        raise PipelineError(f"voiceover ingest failed: {e}") from e
+    rep.info(f"voiceover: {vo_duration:.1f}s")
+
+    # ── 2. VAD + Whisper on voiceover ───────────────────────────────────
+    rep.stage("vad", _STAGE_PROGRESS["vad"])
+    vad_model, get_ts = load_vad_model()
+    regions = detect_speech(
+        vo_wav, _VOICEOVER_CLIP_ID, cfg.vad,
+        model=vad_model, get_timestamps=get_ts,
+    )
+    rep.info(f"voiceover: {len(regions)} speech region(s)")
+
+    transcript = Transcript(
+        clip_id=_VOICEOVER_CLIP_ID, language=cfg.transcribe.language, words=[],
+    )
+    if do_transcribe:
+        rep.stage("transcribing", _STAGE_PROGRESS["transcribing"])
+        whisper = load_whisper_model(cfg.transcribe)
+        transcript = transcribe_clip(
+            vo_wav, regions, _VOICEOVER_CLIP_ID, cfg.transcribe, model=whisper,
+        )
+        rep.info(f"voiceover: {len(transcript.words)} words")
+
+    # ── 3. Fillers + takes on voiceover ──────────────────────────────────
+    filler_cuts: list[Segment] = []
+    if do_fillers and transcript.words:
+        rep.stage("fillers", _STAGE_PROGRESS["fillers"])
+        filler_cuts = detect_fillers(transcript, cfg.fillers)
+        rep.info(f"voiceover: {len(filler_cuts)} filler(s)")
+
+    take_cuts: list[Segment] = []
+    if do_takes and transcript.words:
+        rep.stage("takes", _STAGE_PROGRESS["takes"])
+        take_cuts = detect_repeated_takes(transcript, cfg.takes)
+        rep.info(f"voiceover: {len(take_cuts)} repeated take(s)")
+
+    # ── 4. Silence removal on voiceover ──────────────────────────────────
+    rep.stage("silence_removal", _STAGE_PROGRESS["silence_removal"])
+    word_ts = transcript.to_snap_format()
+    segments = apply_silence_removal(
+        regions, _VOICEOVER_CLIP_ID, vo_duration, cfg.silence,
+        word_timestamps=word_ts or None,
+    )
+    segments = punch_out_fillers(segments, filler_cuts + take_cuts)
+    kept_dur = sum(s.duration for s in segments if s.decision == "keep")
+    rep.info(f"kept {kept_dur:.1f}s of voiceover across {len(segments)} segment(s)")
+
+    # ── 5. Render muted B-roll + voiceover audio ─────────────────────────
+    rep.stage("rendering", _STAGE_PROGRESS["rendering"])
+    stem = "rough_cut"
+    output_name = f"{stem}.mp4"
+
+    # Captions first (same cut-aligned logic as the regular path) so the
+    # single render pass can burn them in if asked.
+    captions_written: dict[str, Path] = {}
+    if do_captions and transcript.words:
+        clip_order = {_VOICEOVER_CLIP_ID: 0}
+        # Build a one-clip EDL so write_cut_captions can walk it.
+        vo_edl = EDL(
+            clips=[],
+            segments=segments,
+            transcripts=[transcript],
+            hook=None,
+        )
+        captions_written = write_cut_captions(
+            vo_edl, cfg.captions, output_dir,
+            stem=stem, clip_order=clip_order,
+        )
+        for name, path in captions_written.items():
+            rep.info(f"wrote {path.name}")
+
+    try:
+        out_mp4 = render_voiceover_vlog(
+            proxies, segments, vo_wav, output_dir, cfg.render,
+            output_name=output_name,
+            subtitles_path=None,   # first render stays clean; re-render can burn.
+            fast_preview=False,
+        )
+    except RenderError as e:
+        raise PipelineError(f"render failed: {e}") from e
+    rep.info(f"wrote {out_mp4.name}")
+
+    # EDL for the review page: segments reference the pseudo "voiceover"
+    # clip. render_chunks mirror the audio's post-silence-removal layout
+    # so the frontend's instant-skip still works for voiceover edits.
+    chunks: list[RenderChunk] = []
+    cursor = 0.0
+    for idx, s in enumerate(segments):
+        if s.decision != "keep" or s.duration <= 1e-3:
+            continue
+        chunks.append(RenderChunk(
+            segment_index=idx, output_start=cursor, output_end=cursor + s.duration,
+        ))
+        cursor += s.duration
+
+    edl = EDL(
+        clips=proxies,
+        segments=segments,
+        transcripts=[transcript],
+        hook=None,
+        render_chunks=chunks,
+    )
+    edl_path = output_dir / "edl.json"
+    save_edl(edl, edl_path)
+    rep.info(f"wrote {edl_path.name}")
+
+    return PipelineResult(
+        proxies=proxies,
+        all_segments=segments,
+        transcripts=[transcript],
+        hook_segment=None,
+        outputs=[out_mp4],
+        edls=[edl_path],
+        captions=list(captions_written.values()),
         elapsed_s=time.perf_counter() - t0,
     )

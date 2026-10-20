@@ -39,6 +39,10 @@ class JobCreateRequest(BaseModel):
     hook: bool = False
     pacing: bool = False
     zoom: bool = False
+    # Voiceover-vlog mode: separate upload_id for the narration audio file.
+    # When set, the clips are treated as muted B-roll and the voiceover
+    # drives analysis + the output's audio track.
+    voiceover_upload_id: str | None = None
 
 
 class CreateUploadRequest(BaseModel):

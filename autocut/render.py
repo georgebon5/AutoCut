@@ -274,6 +274,128 @@ def _has_subtitles_filter() -> bool:
     return False
 
 
+def render_voiceover_vlog(
+    proxies: list[ProxyInfo],
+    voiceover_segments: list[Segment],
+    voiceover_audio_path: Path,
+    output_dir: Path,
+    cfg: RenderConfig,
+    output_name: str = "rough_cut.mp4",
+    subtitles_path: Path | None = None,
+    fast_preview: bool = False,
+) -> Path:
+    """Render a voiceover-driven vlog.
+
+    Audio = concatenation of KEPT voiceover segments (narration slices).
+    Video = concatenation of visual proxy clips in supplied order, muted,
+    trimmed to the kept-audio total duration (held last frame if the clips
+    collectively run short). This is the "B-roll + narration" format where
+    the clip sounds don't appear in the output — only the user's voice.
+
+    ``voiceover_segments`` use the voiceover's absolute timeline (not any
+    clip's). Each kept segment contributes ``[s.start, s.end]`` of the
+    voiceover WAV; cut segments are skipped. Zoom and the hook aren't
+    meaningful in this mode and are ignored.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / output_name
+
+    kept = [s for s in voiceover_segments
+            if s.decision == "keep" and s.duration > 1e-3]
+    kept.sort(key=lambda s: s.start)
+    if not kept:
+        raise RenderError("No kept voiceover segments to render.")
+    audio_dur = sum(s.duration for s in kept)
+
+    cmd: list[str] = ["ffmpeg", "-y"]
+    # Visual inputs first (one -i per visual clip), then the voiceover WAV.
+    for p in proxies:
+        cmd += ["-i", str(p.proxy_path.resolve())]
+    vo_in = len(proxies)
+    cmd += ["-i", str(voiceover_audio_path.resolve())]
+
+    filters: list[str] = []
+    N = len(proxies)
+
+    # Video chain: drop each clip's audio, concat all visuals, cap to the
+    # final audio duration via trim (last frame holds if video is shorter
+    # thanks to tpad=stop_mode=clone).
+    for i in range(N):
+        filters.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+    if N == 1:
+        video_pre = "[v0]"
+    else:
+        video_in_lbl = "".join(f"[v{i}]" for i in range(N))
+        filters.append(f"{video_in_lbl}concat=n={N}:v=1:a=0[vcat]")
+        video_pre = "[vcat]"
+    filters.append(
+        f"{video_pre}tpad=stop_mode=clone:stop_duration={audio_dur:.6f},"
+        f"trim=duration={audio_dur:.6f},setpts=PTS-STARTPTS[vtimed]"
+    )
+    video_pre = "[vtimed]"
+
+    # Audio chain: cut each kept segment out of the voiceover WAV in order,
+    # concat them hard-cut (crossfades are overkill for narration flow).
+    for i, s in enumerate(kept):
+        filters.append(
+            f"[{vo_in}:a]atrim=start={s.start:.6f}:end={s.end:.6f},"
+            f"asetpts=PTS-STARTPTS[aseg{i}]"
+        )
+    audio_in_lbl = "".join(f"[aseg{i}]" for i in range(len(kept)))
+    if len(kept) == 1:
+        filters.append(f"{audio_in_lbl}anull[aout]")
+    else:
+        filters.append(f"{audio_in_lbl}concat=n={len(kept)}:v=0:a=1[aout]")
+
+    # Scale for preview, optional subs overlay (same policy as the main
+    # render path keeps libass drawing onto final-size frames).
+    if fast_preview:
+        filters.append(
+            f"{video_pre}scale='if(gt(iw,ih),min(iw,720),-2)':"
+            f"'if(gt(iw,ih),-2,min(ih,720))'[vscaled]"
+        )
+        video_pre = "[vscaled]"
+    if subtitles_path is not None:
+        filters.append(
+            f"{video_pre}subtitles={subtitles_path.name}[vout]"
+        )
+        video_out = "[vout]"
+    else:
+        video_out = video_pre
+
+    # Codec picks mirror the main render path.
+    if fast_preview and _supports_videotoolbox():
+        video_codec_args = [
+            "-c:v", "h264_videotoolbox",
+            "-b:v", "2500k",
+            "-prio_speed", "1",
+            "-allow_sw", "0",
+            "-realtime", "1",
+        ]
+    else:
+        video_codec_args = [
+            "-c:v", "libx264",
+            "-crf", str(cfg.crf),
+            "-preset", cfg.preset,
+        ]
+
+    cmd += [
+        "-filter_complex", ";".join(filters),
+        "-map", video_out,
+        "-map", "[aout]",
+        *video_codec_args,
+        "-c:a", "aac", "-b:a", "128k",
+        str(output_path.resolve()),
+    ]
+    cwd = (
+        subtitles_path.parent.resolve()
+        if subtitles_path is not None
+        else None
+    )
+    _run(cmd, cwd=cwd)
+    return output_path
+
+
 def burn_subtitles(input_mp4: Path, subtitles_path: Path, output_mp4: Path) -> None:
     """Overlay an ASS/SRT subtitle file onto ``input_mp4`` → ``output_mp4``.
 

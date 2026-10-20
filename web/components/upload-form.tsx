@@ -28,6 +28,7 @@ const PRESETS: { value: JobConfig["preset"]; label: string }[] = [
 export default function UploadForm() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const voiceoverInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [preset, setPreset] = useState<JobConfig["preset"]>("medium");
   const [hook, setHook] = useState(false);
@@ -35,6 +36,12 @@ export default function UploadForm() {
   const [zoom, setZoom] = useState(false);
   const [creatingJob, setCreatingJob] = useState(false);
   const [jobError, setJobError] = useState<string | null>(null);
+
+  // Voiceover-vlog mode: a separate audio file (narration) is uploaded
+  // alongside the clips. When present, the clips become muted B-roll and
+  // the voiceover drives the audio + cut points.
+  const [voiceoverMode, setVoiceoverMode] = useState(false);
+  const [voiceover, setVoiceover] = useState<UploadItem | null>(null);
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -83,12 +90,36 @@ export default function UploadForm() {
     .filter((it) => it.state === "complete" && it.uploadId)
     .map((it) => it.uploadId!) as string[];
 
-  const anyInFlight = items.some((it) => it.state === "uploading");
+  const anyInFlight =
+    items.some((it) => it.state === "uploading")
+    || voiceover?.state === "uploading";
+
+  // Voiceover file upload: single file, same chunked upload machinery.
+  const addVoiceover = async (file: File) => {
+    const starting: UploadItem = { file, state: "pending", uploaded: 0 };
+    setVoiceover(starting);
+    const patch = (p: Partial<UploadItem>) =>
+      setVoiceover((prev) => (prev ? { ...prev, ...p } : prev));
+    patch({ state: "uploading" });
+    try {
+      const uploadId = await uploadFileChunked(file, {
+        onProgress: (bytes) => patch({ uploaded: bytes }),
+      });
+      patch({ state: "complete", uploadId });
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.detail : String(e);
+      patch({ state: "failed", error: msg });
+    }
+  };
+
+  const voiceoverReady =
+    !voiceoverMode || (voiceover?.state === "complete" && !!voiceover.uploadId);
 
   // Pacing is only meaningful when a preset drives selection.
   const pacingDisabled = preset === "none";
 
-  const canCreateJob = completedIds.length > 0 && !anyInFlight && !creatingJob;
+  const canCreateJob =
+    completedIds.length > 0 && !anyInFlight && !creatingJob && voiceoverReady;
 
   const handleCreateJob = async () => {
     setCreatingJob(true);
@@ -100,6 +131,8 @@ export default function UploadForm() {
         hook,
         pacing: pacingDisabled ? false : pacing,
         zoom,
+        voiceover_upload_id:
+          voiceoverMode && voiceover?.uploadId ? voiceover.uploadId : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -159,6 +192,56 @@ export default function UploadForm() {
           </ul>
         </>
       ) : null}
+
+      <div className="glass-card flex flex-col gap-3 rounded-2xl p-4">
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={voiceoverMode}
+            onChange={(e) => {
+              setVoiceoverMode(e.target.checked);
+              if (!e.target.checked) setVoiceover(null);
+            }}
+            className="h-4 w-4 accent-cyan-400"
+          />
+          <span>
+            Voiceover vlog
+            <span className="ml-1 text-xs text-white/50">
+              (τα clips μπαίνουν muted σαν B-roll, η φωνή της αφήγησης είναι ο ήχος)
+            </span>
+          </span>
+        </label>
+
+        {voiceoverMode ? (
+          <>
+            <input
+              ref={voiceoverInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.m4a,.aac"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void addVoiceover(f);
+                if (voiceoverInputRef.current) voiceoverInputRef.current.value = "";
+              }}
+            />
+            {!voiceover ? (
+              <button
+                type="button"
+                onClick={() => voiceoverInputRef.current?.click()}
+                className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-5 text-center text-sm text-white/70 transition hover:border-cyan-400/40 hover:text-white"
+              >
+                Πάτα για να διαλέξεις αρχείο αφήγησης (mp3 / wav / m4a)
+              </button>
+            ) : (
+              <VoiceoverRow
+                item={voiceover}
+                onRemove={() => setVoiceover(null)}
+              />
+            )}
+          </>
+        ) : null}
+      </div>
 
       <fieldset
         className="glass-card flex flex-col gap-4 rounded-2xl p-5"
@@ -276,6 +359,53 @@ function UploadItemRow({
     </li>
   );
 }
+
+function VoiceoverRow({
+  item,
+  onRemove,
+}: {
+  item: UploadItem;
+  onRemove: () => void;
+}) {
+  const pct =
+    item.file.size > 0 ? Math.round((item.uploaded / item.file.size) * 100) : 0;
+  const barColor =
+    item.state === "failed" ? "bg-red-500"
+      : item.state === "complete" ? "bg-emerald-500"
+        : "bg-sky-500";
+  return (
+    <div className="flex items-stretch gap-3 rounded-xl border border-white/10 bg-black/30 p-3">
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <span className="truncate font-medium text-white/90" title={item.file.name}>
+            🎙 {item.file.name}
+          </span>
+          <span className="shrink-0 text-xs text-white/40">
+            {formatBytes(item.file.size)} · {labelFor(item.state)}
+          </span>
+        </div>
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/5">
+          <div
+            className={`h-full ${barColor} transition-all duration-300`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {item.error ? (
+          <p className="mt-2 text-xs text-red-300/90">{item.error}</p>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label="Αφαίρεση voiceover"
+        className="shrink-0 self-start rounded-md px-2 py-1 text-xs text-white/40 transition hover:text-red-300"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 
 function OrderButton({
   label,
