@@ -73,6 +73,12 @@ class PipelineOptions:
     # to vertical TikTok, "16:9" to horizontal YouTube. Only takes effect at
     # render time; the EDL + review stay in source dimensions.
     output_aspect: str = "source"
+    # Semantic matching (voiceover mode only): embed each clip visually via
+    # CLIP, embed each voiceover sentence as text, pair them. The B-roll is
+    # scheduled so the matching clip plays while its matching narration is
+    # heard. Opt-in because it costs a few seconds for the CLIP forward pass
+    # and only makes sense when there are enough clips to actually choose.
+    semantic_match: bool = False
 
 
 @dataclass
@@ -552,6 +558,36 @@ def _run_voiceover_pipeline(
     kept_dur = sum(s.duration for s in segments if s.decision == "keep")
     rep.info(f"kept {kept_dur:.1f}s of voiceover across {len(segments)} segment(s)")
 
+    # ── 4b. Semantic match: pair voiceover segments with best-fit clips ──
+    clip_schedule: list[str] | None = None
+    if options.semantic_match and len(proxies) > 1:
+        rep.stage("semantic", _STAGE_PROGRESS.get("semantic", 0.72))
+        try:
+            from autocut.semantic import (
+                match_sentences_to_clips, visual_embeddings,
+            )
+            # Build per-segment sentence text by joining the transcript words
+            # whose timestamps fall inside each kept voiceover segment.
+            kept_segs = [s for s in segments if s.decision == "keep"]
+            sentences: list[str] = []
+            for s in kept_segs:
+                words = [w.word for w in transcript.words
+                         if s.start <= w.start < s.end]
+                sentences.append(" ".join(words).strip() or "(silence)")
+            vis_embeds = visual_embeddings(
+                {p.clip_id: p.proxy_path for p in proxies}
+            )
+            if vis_embeds:
+                clip_schedule = match_sentences_to_clips(sentences, vis_embeds)
+                rep.info(
+                    f"semantic schedule: "
+                    f"{len(set(clip_schedule))} unique clip(s) across "
+                    f"{len(sentences)} sentence(s)"
+                )
+        except Exception as e:   # noqa: BLE001 — fail soft, keep render running
+            rep.info(f"semantic matching skipped ({type(e).__name__}: {e})")
+            clip_schedule = None
+
     # ── 5. Render muted B-roll + voiceover audio ─────────────────────────
     rep.stage("rendering", _STAGE_PROGRESS["rendering"])
     stem = "rough_cut"
@@ -585,6 +621,7 @@ def _run_voiceover_pipeline(
             audio_enhance=options.audio_enhance,
             audio_denoise=options.audio_denoise,
             output_aspect=options.output_aspect,
+            clip_schedule=clip_schedule,
         )
     except RenderError as e:
         raise PipelineError(f"render failed: {e}") from e

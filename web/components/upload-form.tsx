@@ -47,6 +47,7 @@ export default function UploadForm() {
   const [audioEnhance, setAudioEnhance] = useState(false);
   const [audioDenoise, setAudioDenoise] = useState(false);
   const [outputAspect, setOutputAspect] = useState<"source" | "9:16" | "16:9">("source");
+  const [semanticMatch, setSemanticMatch] = useState(false);
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -141,6 +142,7 @@ export default function UploadForm() {
         audio_enhance: audioEnhance,
         audio_denoise: audioDenoise,
         output_aspect: outputAspect,
+        semantic_match: voiceoverMode && semanticMatch,
       });
       router.push("/");
     } catch (e) {
@@ -247,6 +249,22 @@ export default function UploadForm() {
                 onRemove={() => setVoiceover(null)}
               />
             )}
+
+            <label className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={semanticMatch}
+                onChange={(e) => setSemanticMatch(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-cyan-400"
+              />
+              <span>
+                Έξυπνη αντιστοίχιση clip ↔ αφήγηση
+                <span className="ml-1 text-xs text-white/50">
+                  (CLIP model: όταν λες «καφέ» παίζει το clip του καφέ.
+                  Πρώτη φορά κατεβαίνει μοντέλο ~150MB)
+                </span>
+              </span>
+            </label>
           </>
         ) : null}
       </div>

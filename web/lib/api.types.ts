@@ -48,6 +48,7 @@ export interface JobCreateRequest {
   audio_enhance?: boolean;
   audio_denoise?: boolean;
   output_aspect?: "source" | "9:16" | "16:9";
+  semantic_match?: boolean;
 }
 
 export interface Upload {

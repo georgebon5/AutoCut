@@ -35,6 +35,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 _API_OPTION_KEYS = (
     "preset", "hook", "pacing", "zoom",
     "audio_enhance", "audio_denoise", "output_aspect",
+    "semantic_match",
 )
 
 
@@ -47,6 +48,7 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         audio_enhance=body.audio_enhance,
         audio_denoise=body.audio_denoise,
         output_aspect=body.output_aspect,
+        semantic_match=body.semantic_match,
     )
 
 

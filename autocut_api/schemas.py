@@ -50,6 +50,10 @@ class JobCreateRequest(BaseModel):
     # Output aspect ratio: "source" keeps the original, "9:16" is TikTok
     # vertical, "16:9" is YouTube horizontal.
     output_aspect: str = "source"
+    # Voiceover-mode semantic matching: embed each clip and each sentence
+    # of the narration via CLIP, pair them so the matching clip plays
+    # during its matching sentence. No-op outside voiceover mode.
+    semantic_match: bool = False
 
 
 class CreateUploadRequest(BaseModel):

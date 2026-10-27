@@ -243,6 +243,7 @@ def test_defaults_persisted_when_no_options_in_request(default_client):
     assert body["config"] == {
         "preset": "none", "hook": False, "pacing": False, "zoom": False,
         "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
+        "semantic_match": False,
     }
 
 
@@ -256,6 +257,7 @@ def test_options_persisted_to_config(default_client):
     assert body["config"] == {
         "preset": "medium", "hook": True, "pacing": True, "zoom": True,
         "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
+        "semantic_match": False,
     }
 
 

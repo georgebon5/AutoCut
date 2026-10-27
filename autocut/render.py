@@ -384,6 +384,7 @@ def render_voiceover_vlog(
     audio_enhance: bool = False,
     audio_denoise: bool = False,
     output_aspect: str = "source",
+    clip_schedule: list[str] | None = None,
 ) -> Path:
     """Render a voiceover-driven vlog.
 
@@ -408,47 +409,79 @@ def render_voiceover_vlog(
         raise RenderError("No kept voiceover segments to render.")
     audio_dur = sum(s.duration for s in kept)
 
-    cmd: list[str] = ["ffmpeg", "-y"]
-    # Visual inputs first (one -i per visual clip), then the voiceover WAV.
-    for p in proxies:
-        cmd += ["-i", str(p.proxy_path.resolve())]
-    vo_in = len(proxies)
-    cmd += ["-i", str(voiceover_audio_path.resolve())]
-
-    # Face centres per visual clip for aspect-crop. Reused across the
-    # concat so each B-roll clip keeps the subject in-shot even when the
-    # output aspect differs from the source.
+    # Face centres per clip (once, reused regardless of schedule mode).
     face_centers: dict[str, tuple[float, float]] = {}
     if output_aspect != "source":
         from autocut.face_tracking import estimate_face_center
         for p in proxies:
             face_centers[p.clip_id] = estimate_face_center(p.proxy_path)
 
-    filters: list[str] = []
-    N = len(proxies)
-
-    # Video chain: drop each clip's audio, concat all visuals, cap to the
-    # final audio duration via trim (last frame holds if video is shorter
-    # thanks to tpad=stop_mode=clone). Per-clip aspect crop is applied up
-    # front so each clip's face position is honoured in the final crop.
-    for i, p in enumerate(proxies):
-        chain = f"[{i}:v]setpts=PTS-STARTPTS"
-        cx, cy = face_centers.get(p.clip_id, (0.5, 0.5))
-        crop = _aspect_crop_chain(output_aspect, cx, cy)
-        if crop:
-            chain += "," + crop
-        filters.append(f"{chain}[v{i}]")
-    if N == 1:
-        video_pre = "[v0]"
-    else:
-        video_in_lbl = "".join(f"[v{i}]" for i in range(N))
-        filters.append(f"{video_in_lbl}concat=n={N}:v=1:a=0[vcat]")
-        video_pre = "[vcat]"
-    filters.append(
-        f"{video_pre}tpad=stop_mode=clone:stop_duration={audio_dur:.6f},"
-        f"trim=duration={audio_dur:.6f},setpts=PTS-STARTPTS[vtimed]"
+    proxy_by_id = {p.clip_id: p for p in proxies}
+    use_schedule = (
+        clip_schedule is not None
+        and len(clip_schedule) == len(kept)
+        and all(cid in proxy_by_id for cid in clip_schedule)
     )
-    video_pre = "[vtimed]"
+
+    cmd: list[str] = ["ffmpeg", "-y"]
+    filters: list[str] = []
+
+    if use_schedule:
+        assert clip_schedule is not None   # narrow for the type checker
+        # Semantic-matched schedule: each kept voiceover segment plays a
+        # specific clip. Add one -i per segment (same file can appear many
+        # times — ffmpeg gives each its own decoder) with `-stream_loop -1`
+        # so short clips loop to fit long segments. Per-segment trim +
+        # aspect-crop then concat all per-segment video streams.
+        for cid in clip_schedule:
+            p = proxy_by_id[cid]
+            cmd += ["-stream_loop", "-1", "-i", str(p.proxy_path.resolve())]
+        vo_in = len(clip_schedule)
+        cmd += ["-i", str(voiceover_audio_path.resolve())]
+
+        for i, (seg, cid) in enumerate(zip(kept, clip_schedule)):
+            cx, cy = face_centers.get(cid, (0.5, 0.5))
+            crop = _aspect_crop_chain(output_aspect, cx, cy)
+            chain = (
+                f"[{i}:v]trim=duration={seg.duration:.6f},"
+                f"setpts=PTS-STARTPTS"
+            )
+            if crop:
+                chain += "," + crop
+            filters.append(f"{chain}[v{i}]")
+        video_in_lbl = "".join(f"[v{i}]" for i in range(len(kept)))
+        if len(kept) == 1:
+            video_pre = "[v0]"
+        else:
+            filters.append(f"{video_in_lbl}concat=n={len(kept)}:v=1:a=0[vcat]")
+            video_pre = "[vcat]"
+    else:
+        # Default: upload-order concat, trimmed to audio duration (holds the
+        # last frame if clips collectively run short).
+        for p in proxies:
+            cmd += ["-i", str(p.proxy_path.resolve())]
+        vo_in = len(proxies)
+        cmd += ["-i", str(voiceover_audio_path.resolve())]
+
+        N = len(proxies)
+        for i, p in enumerate(proxies):
+            chain = f"[{i}:v]setpts=PTS-STARTPTS"
+            cx, cy = face_centers.get(p.clip_id, (0.5, 0.5))
+            crop = _aspect_crop_chain(output_aspect, cx, cy)
+            if crop:
+                chain += "," + crop
+            filters.append(f"{chain}[v{i}]")
+        if N == 1:
+            video_pre = "[v0]"
+        else:
+            video_in_lbl = "".join(f"[v{i}]" for i in range(N))
+            filters.append(f"{video_in_lbl}concat=n={N}:v=1:a=0[vcat]")
+            video_pre = "[vcat]"
+        filters.append(
+            f"{video_pre}tpad=stop_mode=clone:stop_duration={audio_dur:.6f},"
+            f"trim=duration={audio_dur:.6f},setpts=PTS-STARTPTS[vtimed]"
+        )
+        video_pre = "[vtimed]"
 
     # Audio chain: cut each kept segment out of the voiceover WAV in order,
     # concat them hard-cut (crossfades are overkill for narration flow).
