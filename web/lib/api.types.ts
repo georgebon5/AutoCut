@@ -45,6 +45,9 @@ export interface JobCreateRequest {
   pacing?: boolean;
   zoom?: boolean;
   voiceover_upload_id?: string;
+  audio_enhance?: boolean;
+  audio_denoise?: boolean;
+  output_aspect?: "source" | "9:16" | "16:9";
 }
 
 export interface Upload {

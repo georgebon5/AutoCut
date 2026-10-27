@@ -43,6 +43,13 @@ class JobCreateRequest(BaseModel):
     # When set, the clips are treated as muted B-roll and the voiceover
     # drives analysis + the output's audio track.
     voiceover_upload_id: str | None = None
+    # Audio polish at render time (highpass + compressor + loudnorm; and
+    # ffmpeg's afftdn spectral denoise). Both are opt-in.
+    audio_enhance: bool = False
+    audio_denoise: bool = False
+    # Output aspect ratio: "source" keeps the original, "9:16" is TikTok
+    # vertical, "16:9" is YouTube horizontal.
+    output_aspect: str = "source"
 
 
 class CreateUploadRequest(BaseModel):

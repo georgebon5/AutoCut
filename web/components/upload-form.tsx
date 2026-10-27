@@ -43,6 +43,11 @@ export default function UploadForm() {
   const [voiceoverMode, setVoiceoverMode] = useState(false);
   const [voiceover, setVoiceover] = useState<UploadItem | null>(null);
 
+  // Post-production polish applied at render time (both default off).
+  const [audioEnhance, setAudioEnhance] = useState(false);
+  const [audioDenoise, setAudioDenoise] = useState(false);
+  const [outputAspect, setOutputAspect] = useState<"source" | "9:16" | "16:9">("source");
+
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
   const moveItem = (file: File, direction: -1 | 1) =>
@@ -133,6 +138,9 @@ export default function UploadForm() {
         zoom,
         voiceover_upload_id:
           voiceoverMode && voiceover?.uploadId ? voiceover.uploadId : undefined,
+        audio_enhance: audioEnhance,
+        audio_denoise: audioDenoise,
+        output_aspect: outputAspect,
       });
       router.push("/");
     } catch (e) {
@@ -278,6 +286,39 @@ export default function UploadForm() {
           onChange={setPacing}
         />
         <Checkbox label="Μικρό zoom στα highlights" checked={zoom} onChange={setZoom} />
+      </fieldset>
+
+      <fieldset
+        className="glass-card flex flex-col gap-4 rounded-2xl p-5"
+        disabled={!canCreateJob}
+      >
+        <legend className="px-2 text-[11px] font-medium uppercase tracking-[0.2em] text-white/40">
+          Ποιότητα εξόδου
+        </legend>
+
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-white/60">Format</span>
+          <select
+            value={outputAspect}
+            onChange={(e) => setOutputAspect(e.target.value as typeof outputAspect)}
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
+          >
+            <option value="source">Όπως το αρχικό</option>
+            <option value="9:16">Κάθετο 9:16 (TikTok / Reels)</option>
+            <option value="16:9">Οριζόντιο 16:9 (YouTube)</option>
+          </select>
+        </label>
+
+        <Checkbox
+          label="Καθαρισμός φωνής (compressor + loudness normalisation)"
+          checked={audioEnhance}
+          onChange={setAudioEnhance}
+        />
+        <Checkbox
+          label="Μείωση θορύβου περιβάλλοντος (αέρας, βουή, hiss)"
+          checked={audioDenoise}
+          onChange={setAudioDenoise}
+        />
       </fieldset>
 
       {jobError ? (

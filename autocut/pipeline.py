@@ -63,6 +63,16 @@ class PipelineOptions:
     # output's audio IS the voiceover; the output's video is the concatenated
     # clips, trimmed to the voiceover's post-silence-removal duration.
     voiceover_audio_path: Path | None = None
+    # Audio polish applied at render time: enhance = highpass + compressor +
+    # loudness normalisation (sounds "produced"); denoise = ffmpeg's afftdn
+    # spectral subtraction for ambient hiss / wind / crowd. Both are no-op
+    # false by default so the raw audio stays untouched unless the user asks.
+    audio_enhance: bool = False
+    audio_denoise: bool = False
+    # Output aspect: "source" keeps original clip aspect, "9:16" center-crops
+    # to vertical TikTok, "16:9" to horizontal YouTube. Only takes effect at
+    # render time; the EDL + review stay in source dimensions.
+    output_aspect: str = "source"
 
 
 @dataclass
@@ -401,6 +411,9 @@ def run_pipeline(
             out_mp4 = render(
                 proxies, segs, output_dir, cfg.render,
                 output_name=video_name, hook=hook_seg, zoom=cfg.zoom,
+                audio_enhance=options.audio_enhance,
+                audio_denoise=options.audio_denoise,
+                output_aspect=options.output_aspect,
             )
         except RenderError as e:
             raise PipelineError(f"render failed: {e}") from e
@@ -569,6 +582,9 @@ def _run_voiceover_pipeline(
             output_name=output_name,
             subtitles_path=None,   # first render stays clean; re-render can burn.
             fast_preview=False,
+            audio_enhance=options.audio_enhance,
+            audio_denoise=options.audio_denoise,
+            output_aspect=options.output_aspect,
         )
     except RenderError as e:
         raise PipelineError(f"render failed: {e}") from e

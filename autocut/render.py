@@ -47,6 +47,44 @@ def _run(cmd: list[str], cwd: Path | None = None) -> None:
         )
 
 
+def _audio_polish_chain(enhance: bool, denoise: bool) -> str:
+    """ffmpeg filter chain to clean up the final audio track.
+
+    Order matters: denoise before compression (compressor would otherwise
+    amplify the noise floor during quiet frames); loudnorm last so the final
+    peak sits at a streaming-safe -1.5 dBTP target. Returns an empty string
+    when neither flag is set so callers can safely concat.
+    """
+    parts: list[str] = []
+    if denoise:
+        # afftdn: spectral subtraction. nr = noise reduction amount (dB),
+        # nf = assumed noise floor. These values work well on phone-recorded
+        # ambient hiss without chewing into the voice formants.
+        parts.append("afftdn=nr=12:nf=-25")
+    if enhance:
+        parts += [
+            "highpass=f=80",            # cut rumble / mic handling
+            "acompressor=threshold=-20dB:ratio=3:attack=5:release=50",
+            "loudnorm=I=-14:TP=-1.5:LRA=11",  # streaming-standard loudness
+        ]
+    return ",".join(parts)
+
+
+def _aspect_crop_chain(aspect: str) -> str:
+    """Center-crop filter to the requested output aspect.
+
+    "source" is a no-op. For 9:16 / 16:9 we compute the maximum centred box
+    that fits inside the source frame — if the source is already the target
+    ratio nothing visible changes. No scaling here; the fast_preview scale
+    comes later in the chain and operates on the cropped frame.
+    """
+    if aspect == "9:16":
+        return "crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)'"
+    if aspect == "16:9":
+        return "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)'"
+    return ""
+
+
 def _zoom_filter(rs: _RenderSegment) -> str:
     """Crop+scale filter chain producing a linear push-in zoom.
 
@@ -69,6 +107,9 @@ def _build_render_cmd(
     cfg: RenderConfig,
     fast_preview: bool = False,
     subtitles_filename: str | None = None,
+    audio_enhance: bool = False,
+    audio_denoise: bool = False,
+    output_aspect: str = "source",
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -167,6 +208,22 @@ def _build_render_cmd(
                 )
                 current = label
         audio_out = "[aout]"
+
+    # Audio polish (denoise / enhance) runs on the concatenated audio so
+    # loudness normalisation sees the whole output and sets one consistent
+    # gain across all segments, instead of per-segment lurches.
+    polish = _audio_polish_chain(audio_enhance, audio_denoise)
+    if polish:
+        filters.append(f"{audio_out}{polish}[apolished]")
+        audio_out = "[apolished]"
+
+    # Aspect-ratio center-crop (optional) runs before any scale/subs filter
+    # so the preview downscale and subtitle rendering happen on the final
+    # cropped frame — no wasted pixels, no re-cropped captions.
+    crop_chain = _aspect_crop_chain(output_aspect)
+    if crop_chain:
+        filters.append(f"{video_pre_subs}{crop_chain}[vcropped]")
+        video_pre_subs = "[vcropped]"
 
     # In fast_preview mode, cap the long edge at 720px before anything else
     # downstream. On 1080p/4K phone footage this ~4-9x fewer pixels for the
@@ -283,6 +340,9 @@ def render_voiceover_vlog(
     output_name: str = "rough_cut.mp4",
     subtitles_path: Path | None = None,
     fast_preview: bool = False,
+    audio_enhance: bool = False,
+    audio_denoise: bool = False,
+    output_aspect: str = "source",
 ) -> Path:
     """Render a voiceover-driven vlog.
 
@@ -346,6 +406,17 @@ def render_voiceover_vlog(
         filters.append(f"{audio_in_lbl}anull[aout]")
     else:
         filters.append(f"{audio_in_lbl}concat=n={len(kept)}:v=0:a=1[aout]")
+    audio_out_label = "[aout]"
+
+    polish = _audio_polish_chain(audio_enhance, audio_denoise)
+    if polish:
+        filters.append(f"{audio_out_label}{polish}[apolished]")
+        audio_out_label = "[apolished]"
+
+    crop_chain = _aspect_crop_chain(output_aspect)
+    if crop_chain:
+        filters.append(f"{video_pre}{crop_chain}[vcropped]")
+        video_pre = "[vcropped]"
 
     # Scale for preview, optional subs overlay (same policy as the main
     # render path keeps libass drawing onto final-size frames).
@@ -382,7 +453,7 @@ def render_voiceover_vlog(
     cmd += [
         "-filter_complex", ";".join(filters),
         "-map", video_out,
-        "-map", "[aout]",
+        "-map", audio_out_label,
         *video_codec_args,
         "-c:a", "aac", "-b:a", "128k",
         str(output_path.resolve()),
@@ -450,6 +521,9 @@ def render(
     zoom: ZoomConfig | None = None,
     fast_preview: bool = False,
     subtitles_path: Path | None = None,
+    audio_enhance: bool = False,
+    audio_denoise: bool = False,
+    output_aspect: str = "source",
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -534,6 +608,9 @@ def render(
         kept_render, output_path, cfg,
         fast_preview=fast_preview,
         subtitles_filename=subs_name,
+        audio_enhance=audio_enhance,
+        audio_denoise=audio_denoise,
+        output_aspect=output_aspect,
     )
     _run(cmd, cwd=cwd)
     return output_path

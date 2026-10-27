@@ -32,7 +32,10 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 # Only these PipelineOptions fields are exposed to the API — the rest
 # (transcribe, fillers, takes, captions, features) stay at the defaults
 # because the web UI always runs the full pipeline.
-_API_OPTION_KEYS = ("preset", "hook", "pacing", "zoom")
+_API_OPTION_KEYS = (
+    "preset", "hook", "pacing", "zoom",
+    "audio_enhance", "audio_denoise", "output_aspect",
+)
 
 
 def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
@@ -41,6 +44,9 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         hook=body.hook,
         pacing=body.pacing,
         zoom=body.zoom,
+        audio_enhance=body.audio_enhance,
+        audio_denoise=body.audio_denoise,
+        output_aspect=body.output_aspect,
     )
 
 

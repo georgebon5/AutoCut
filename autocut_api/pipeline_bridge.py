@@ -199,6 +199,9 @@ def rerender_from_edl(
                     "υπότιτλοι μέσα στο βίντεο δεν μπήκαν: ffmpeg χωρίς libass "
                     "— εγκατάσταση ffmpeg-full για burn-in"
                 )
+        # Audio-polish + aspect were applied at the first render — reread
+        # them from the stored job config so the re-render reproduces the
+        # same look/sound. Unknown fields default to off/source.
         render(
             proxies=edl.clips,
             segments=edl.segments,
@@ -207,10 +210,11 @@ def rerender_from_edl(
             output_name=output_name,
             hook=edl.hook,
             zoom=cfg.zoom,
-            # Re-renders are review previews, not final deliverables — use
-            # the hardware encoder when available to cut encode time by ~3-5x.
             fast_preview=True,
             subtitles_path=subtitles_path,
+            audio_enhance=bool(opts.get("audio_enhance", False)),
+            audio_denoise=bool(opts.get("audio_denoise", False)),
+            output_aspect=str(opts.get("output_aspect", "source")),
         )
         # Persist the recomputed chunk map so the next EDL fetch carries it.
         save_edl(edl, edl_path)

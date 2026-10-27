@@ -242,6 +242,7 @@ def test_defaults_persisted_when_no_options_in_request(default_client):
     body = client.post("/jobs", json={"upload_ids": [uid]}).json()
     assert body["config"] == {
         "preset": "none", "hook": False, "pacing": False, "zoom": False,
+        "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
     }
 
 
@@ -254,6 +255,7 @@ def test_options_persisted_to_config(default_client):
     }).json()
     assert body["config"] == {
         "preset": "medium", "hook": True, "pacing": True, "zoom": True,
+        "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
     }
 
 
