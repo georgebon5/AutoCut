@@ -24,6 +24,8 @@ export interface JobConfig {
   // the clips. The UI uses this to adapt labels (muted B-roll vs talking-
   // head) in review.
   voiceover_mode?: boolean;
+  // Background music: present when a music track was uploaded.
+  music_path?: string;
 }
 
 export interface Job {
@@ -49,6 +51,7 @@ export interface JobCreateRequest {
   audio_denoise?: boolean;
   output_aspect?: "source" | "9:16" | "16:9";
   semantic_match?: boolean;
+  music_upload_id?: string;
 }
 
 export interface Upload {

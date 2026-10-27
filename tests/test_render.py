@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from autocut.config import RenderConfig, ZoomConfig
+from autocut.config import MusicConfig, RenderConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
 from autocut.render import RenderError, _RenderSegment, _build_render_cmd, render
 from tests.conftest import make_clip, skip_no_ffmpeg
@@ -167,6 +167,96 @@ def test_cmd_video_and_audio_are_separate_inputs():
     inputs = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-i"]
     assert any(p.endswith("proxy.mp4") for p in inputs)
     assert any(p.endswith("audio.wav") for p in inputs)
+
+
+# ---------------------------------------------------------------------------
+# Music + ducking — pure unit tests
+# ---------------------------------------------------------------------------
+
+def test_cmd_no_music_path_no_ducking_filters():
+    """Without music_path the filter graph must be unchanged."""
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        Path("out.mp4"), default_cfg(),
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "sidechaincompress" not in fc
+    assert "amix" not in fc
+    assert "_mloop" not in fc
+
+
+def test_cmd_music_path_adds_ducking_filters():
+    """When music_path is given, the filter graph must include ducking."""
+    music = Path("bg.mp3")
+    cfg = MusicConfig(baseline_volume=0.2, duck_ratio=8.0, attack_ms=25.0,
+                      release_ms=1200.0, threshold=0.02, fadeout_duration_s=2.0)
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 4.0)],
+        Path("out.mp4"), default_cfg(),
+        music_path=music, music_cfg=cfg,
+    )
+    # Music file must be listed as an input.
+    inputs = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-i"]
+    assert any(p.endswith("bg.mp3") for p in inputs)
+
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "aloop=loop=-1" in fc
+    assert "sidechaincompress" in fc
+    assert "amix=inputs=2" in fc
+    assert "asplit=2" in fc
+    assert "[afinal]" in fc
+    # Final audio map should be [afinal], not the raw [aout].
+    maps = [cmd[i + 1] for i, v in enumerate(cmd) if v == "-map"]
+    assert "[afinal]" in maps
+
+
+def test_cmd_music_baseline_volume_in_filter():
+    cfg = MusicConfig(baseline_volume=0.15)
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 3.0)],
+        Path("out.mp4"), default_cfg(),
+        music_path=Path("m.mp3"), music_cfg=cfg,
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "volume=0.1500" in fc
+
+
+def test_cmd_music_fadeout_uses_total_duration():
+    """Fade-out start time must equal total_dur - fadeout_duration_s."""
+    cfg = MusicConfig(fadeout_duration_s=3.0)
+    kept = [rs(Path("a.mp4"), Path("a.wav"), 0.0, 5.0),
+            rs(Path("b.mp4"), Path("b.wav"), 0.0, 3.0)]  # total = 8s
+    cmd = _build_render_cmd(kept, Path("out.mp4"), default_cfg(),
+                            music_path=Path("m.mp3"), music_cfg=cfg)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # fade start = 8 - 3 = 5.000
+    assert "afade=t=out:st=5.000:d=3.000" in fc
+
+
+def test_cmd_music_duck_ratio_in_filter():
+    cfg = MusicConfig(duck_ratio=12.0)
+    cmd = _build_render_cmd(
+        [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)],
+        Path("out.mp4"), default_cfg(),
+        music_path=Path("m.mp3"), music_cfg=cfg,
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "ratio=12.0" in fc
+
+
+def test_cmd_music_with_audio_polish_correct_order():
+    """Music ducking must come AFTER audio polish — [apolished] feeds asplit."""
+    from autocut.render import _audio_polish_chain
+    cfg = MusicConfig()
+    kept = [rs(Path("a.mp4"), Path("a.wav"), 0.0, 2.0)]
+    cmd = _build_render_cmd(kept, Path("out.mp4"), default_cfg(),
+                            audio_enhance=True, audio_denoise=False,
+                            music_path=Path("m.mp3"), music_cfg=cfg)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # [apolished] must appear before asplit in the filter chain.
+    pos_polished = fc.find("[apolished]")
+    pos_split = fc.find("asplit=2")
+    assert pos_polished < pos_split, "polish should precede duck"
 
 
 # ---------------------------------------------------------------------------

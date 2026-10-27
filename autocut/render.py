@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autocut.config import RenderConfig, ZoomConfig
+from autocut.config import MusicConfig, RenderConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
 
 
@@ -140,6 +140,60 @@ def _zoom_filter(rs: _RenderSegment) -> str:
     )
 
 
+def _music_duck_filters(
+    voice_label: str,
+    music_fi: int,
+    total_dur: float,
+    music_cfg: MusicConfig,
+    out_label: str = "[afinal]",
+) -> tuple[list[str], str]:
+    """Return filter-graph lines that duck music under voice.
+
+    Takes the current voice audio label and the ffmpeg input index of the
+    music file.  Returns (extra_filters, new_audio_label).
+
+    Filter chain:
+      1. asplit the voice so it feeds both the sidechain and the final mix.
+      2. Loop the music (handles files shorter than the video).
+      3. Fade the music out near the end of the video so it doesn't clip off.
+      4. Set baseline volume.
+      5. sidechaincompress: music is the signal, voice is the sidechain — the
+         music ducks whenever the voice exceeds `threshold`.
+      6. amix: blend voice + ducked music.  `normalize=0` preserves levels
+         (avoids halving the voice when mixing); `duration=first` ends the
+         audio when the voice ends.
+    """
+    fade_start = max(0.0, total_dur - music_cfg.fadeout_duration_s)
+    fade_dur = min(music_cfg.fadeout_duration_s, total_dur)
+
+    f: list[str] = [
+        # Split voice: [_vspk] for the final mix, [_vsc] for the sidechain.
+        f"{voice_label}asplit=2[_vspk][_vsc]",
+        # Loop + fade + volume baseline for the music track.
+        (
+            f"[{music_fi}:a]"
+            f"aloop=loop=-1:size=2000000000,"
+            f"afade=t=out:st={fade_start:.3f}:d={fade_dur:.3f},"
+            f"volume={music_cfg.baseline_volume:.4f}"
+            f"[_mloop]"
+        ),
+        # Sidechain compress: music ([_mloop]) ducked by voice ([_vsc]).
+        (
+            f"[_mloop][_vsc]"
+            f"sidechaincompress="
+            f"threshold={music_cfg.threshold:.4f}:"
+            f"ratio={music_cfg.duck_ratio:.1f}:"
+            f"attack={music_cfg.attack_ms:.0f}:"
+            f"release={music_cfg.release_ms:.0f}:"
+            f"level_sc=1"
+            f"[_mducked]"
+        ),
+        # Final mix: voice + ducked music → out_label.
+        f"[_vspk][_mducked]amix=inputs=2:duration=first:normalize=0:dropout_transition=3{out_label}",
+    ]
+    return f, out_label
+
+
 def _build_render_cmd(
     kept: list[_RenderSegment],
     output_path: Path,
@@ -149,6 +203,8 @@ def _build_render_cmd(
     audio_enhance: bool = False,
     audio_denoise: bool = False,
     output_aspect: str = "source",
+    music_path: Path | None = None,
+    music_cfg: MusicConfig | None = None,
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -197,6 +253,13 @@ def _build_render_cmd(
             fi += 1
         else:
             audio_idx.append(None)
+
+    # Music input: no time-seek here — ducking works on the full track length.
+    music_fi: int | None = None
+    if music_path is not None:
+        cmd += ["-i", str(music_path.resolve())]
+        music_fi = fi
+        fi += 1
 
     filters: list[str] = []
 
@@ -262,6 +325,16 @@ def _build_render_cmd(
     if polish:
         filters.append(f"{audio_out}{polish}[apolished]")
         audio_out = "[apolished]"
+
+    # Background music + sidechain ducking. Runs AFTER polish so the voice
+    # audio the compressor sees is already cleaned up (accurate loudness →
+    # more reliable ducking threshold).
+    if music_fi is not None and music_cfg is not None:
+        total_dur = sum(rs.duration for rs in kept)
+        duck_filters, audio_out = _music_duck_filters(
+            audio_out, music_fi, total_dur, music_cfg,
+        )
+        filters.extend(duck_filters)
 
     # Aspect-ratio crop is applied per-segment above (so each clip's face
     # position is respected). Nothing left to do here.
@@ -385,6 +458,8 @@ def render_voiceover_vlog(
     audio_denoise: bool = False,
     output_aspect: str = "source",
     clip_schedule: list[str] | None = None,
+    music_path: Path | None = None,
+    music_cfg: MusicConfig | None = None,
 ) -> Path:
     """Render a voiceover-driven vlog.
 
@@ -438,6 +513,10 @@ def render_voiceover_vlog(
             cmd += ["-stream_loop", "-1", "-i", str(p.proxy_path.resolve())]
         vo_in = len(clip_schedule)
         cmd += ["-i", str(voiceover_audio_path.resolve())]
+        music_fi_vo: int | None = None
+        if music_path is not None:
+            cmd += ["-i", str(music_path.resolve())]
+            music_fi_vo = vo_in + 1
 
         for i, (seg, cid) in enumerate(zip(kept, clip_schedule)):
             cx, cy = face_centers.get(cid, (0.5, 0.5))
@@ -462,6 +541,10 @@ def render_voiceover_vlog(
             cmd += ["-i", str(p.proxy_path.resolve())]
         vo_in = len(proxies)
         cmd += ["-i", str(voiceover_audio_path.resolve())]
+        music_fi_vo: int | None = None
+        if music_path is not None:
+            cmd += ["-i", str(music_path.resolve())]
+            music_fi_vo = vo_in + 1
 
         N = len(proxies)
         for i, p in enumerate(proxies):
@@ -501,6 +584,13 @@ def render_voiceover_vlog(
     if polish:
         filters.append(f"{audio_out_label}{polish}[apolished]")
         audio_out_label = "[apolished]"
+
+    # Background music + sidechain ducking (same as the main render path).
+    if music_fi_vo is not None and music_cfg is not None:
+        duck_filters, audio_out_label = _music_duck_filters(
+            audio_out_label, music_fi_vo, audio_dur, music_cfg,
+        )
+        filters.extend(duck_filters)
 
     # Aspect crop handled per-input above; nothing to do here.
 
@@ -610,6 +700,8 @@ def render(
     audio_enhance: bool = False,
     audio_denoise: bool = False,
     output_aspect: str = "source",
+    music_path: Path | None = None,
+    music_cfg: MusicConfig | None = None,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -709,6 +801,8 @@ def render(
         audio_enhance=audio_enhance,
         audio_denoise=audio_denoise,
         output_aspect=output_aspect,
+        music_path=music_path,
+        music_cfg=music_cfg,
     )
     _run(cmd, cwd=cwd)
     return output_path

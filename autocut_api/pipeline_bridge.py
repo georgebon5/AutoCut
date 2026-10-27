@@ -95,11 +95,14 @@ def _load_options(session_factory: sessionmaker, job_id: str) -> PipelineOptions
     data.pop("model_used", None)
     voiceover_path_str = data.pop("voiceover_audio_path", None)
     data.pop("voiceover_mode", None)
+    music_path_str = data.pop("music_path", None)
     options = PipelineOptions(**data)
     if model_path_str:
         options.model_path = Path(model_path_str)
     if voiceover_path_str:
         options.voiceover_audio_path = Path(voiceover_path_str)
+    if music_path_str:
+        options.music_path = Path(music_path_str)
     return options
 
 
@@ -202,6 +205,11 @@ def rerender_from_edl(
         # Audio-polish + aspect were applied at the first render — reread
         # them from the stored job config so the re-render reproduces the
         # same look/sound. Unknown fields default to off/source.
+        music_path_rerender: Path | None = None
+        if opts.get("music_path"):
+            mp = Path(opts["music_path"])
+            if mp.exists():
+                music_path_rerender = mp
         render(
             proxies=edl.clips,
             segments=edl.segments,
@@ -215,6 +223,8 @@ def rerender_from_edl(
             audio_enhance=bool(opts.get("audio_enhance", False)),
             audio_denoise=bool(opts.get("audio_denoise", False)),
             output_aspect=str(opts.get("output_aspect", "source")),
+            music_path=music_path_rerender,
+            music_cfg=cfg.music,
         )
         # Persist the recomputed chunk map so the next EDL fetch carries it.
         save_edl(edl, edl_path)

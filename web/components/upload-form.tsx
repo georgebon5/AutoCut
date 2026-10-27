@@ -29,6 +29,7 @@ export default function UploadForm() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const voiceoverInputRef = useRef<HTMLInputElement | null>(null);
+  const musicInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [preset, setPreset] = useState<JobConfig["preset"]>("medium");
   const [hook, setHook] = useState(false);
@@ -42,6 +43,9 @@ export default function UploadForm() {
   // the voiceover drives the audio + cut points.
   const [voiceoverMode, setVoiceoverMode] = useState(false);
   const [voiceover, setVoiceover] = useState<UploadItem | null>(null);
+
+  // Background music + auto-ducking. Optional for any mode.
+  const [music, setMusic] = useState<UploadItem | null>(null);
 
   // Post-production polish applied at render time (both default off).
   const [audioEnhance, setAudioEnhance] = useState(false);
@@ -98,7 +102,8 @@ export default function UploadForm() {
 
   const anyInFlight =
     items.some((it) => it.state === "uploading")
-    || voiceover?.state === "uploading";
+    || voiceover?.state === "uploading"
+    || music?.state === "uploading";
 
   // Voiceover file upload: single file, same chunked upload machinery.
   const addVoiceover = async (file: File) => {
@@ -118,14 +123,33 @@ export default function UploadForm() {
     }
   };
 
+  // Music file upload: single file, same chunked upload machinery as voiceover.
+  const addMusic = async (file: File) => {
+    const starting: UploadItem = { file, state: "pending", uploaded: 0 };
+    setMusic(starting);
+    const patch = (p: Partial<UploadItem>) =>
+      setMusic((prev) => (prev ? { ...prev, ...p } : prev));
+    patch({ state: "uploading" });
+    try {
+      const uploadId = await uploadFileChunked(file, {
+        onProgress: (bytes) => patch({ uploaded: bytes }),
+      });
+      patch({ state: "complete", uploadId });
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.detail : String(e);
+      patch({ state: "failed", error: msg });
+    }
+  };
+
   const voiceoverReady =
     !voiceoverMode || (voiceover?.state === "complete" && !!voiceover.uploadId);
+  const musicReady = !music || music.state === "complete" || music.state === "failed";
 
   // Pacing is only meaningful when a preset drives selection.
   const pacingDisabled = preset === "none";
 
   const canCreateJob =
-    completedIds.length > 0 && !anyInFlight && !creatingJob && voiceoverReady;
+    completedIds.length > 0 && !anyInFlight && !creatingJob && voiceoverReady && musicReady;
 
   const handleCreateJob = async () => {
     setCreatingJob(true);
@@ -143,6 +167,8 @@ export default function UploadForm() {
         audio_denoise: audioDenoise,
         output_aspect: outputAspect,
         semantic_match: voiceoverMode && semanticMatch,
+        music_upload_id:
+          music?.state === "complete" && music.uploadId ? music.uploadId : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -337,6 +363,42 @@ export default function UploadForm() {
           checked={audioDenoise}
           onChange={setAudioDenoise}
         />
+
+        {/* Background music */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <p className="text-xs text-white/50">
+            Background music{" "}
+            <span className="text-white/30">
+              (αυτόματο ducking — χαμηλώνει όταν μιλάς, ανεβαίνει στις σιωπές)
+            </span>
+          </p>
+          <input
+            ref={musicInputRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void addMusic(f);
+              if (musicInputRef.current) musicInputRef.current.value = "";
+            }}
+          />
+          {!music ? (
+            <button
+              type="button"
+              onClick={() => musicInputRef.current?.click()}
+              className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-4 py-4 text-center text-sm text-white/50 transition hover:border-indigo-400/40 hover:text-white/80"
+            >
+              + Πρόσθεσε μουσική (mp3 / wav / m4a)
+            </button>
+          ) : (
+            <AudioFileRow
+              item={music}
+              icon="♪"
+              onRemove={() => setMusic(null)}
+            />
+          )}
+        </div>
       </fieldset>
 
       {jobError ? (
@@ -419,11 +481,13 @@ function UploadItemRow({
   );
 }
 
-function VoiceoverRow({
+function AudioFileRow({
   item,
+  icon,
   onRemove,
 }: {
   item: UploadItem;
+  icon: string;
   onRemove: () => void;
 }) {
   const pct =
@@ -437,7 +501,7 @@ function VoiceoverRow({
       <div className="flex min-w-0 flex-1 flex-col justify-center">
         <div className="flex items-center justify-between gap-2 text-sm">
           <span className="truncate font-medium text-white/90" title={item.file.name}>
-            🎙 {item.file.name}
+            {icon} {item.file.name}
           </span>
           <span className="shrink-0 text-xs text-white/40">
             {formatBytes(item.file.size)} · {labelFor(item.state)}
@@ -456,13 +520,23 @@ function VoiceoverRow({
       <button
         type="button"
         onClick={onRemove}
-        aria-label="Αφαίρεση voiceover"
+        aria-label="Αφαίρεση"
         className="shrink-0 self-start rounded-md px-2 py-1 text-xs text-white/40 transition hover:text-red-300"
       >
         ×
       </button>
     </div>
   );
+}
+
+function VoiceoverRow({
+  item,
+  onRemove,
+}: {
+  item: UploadItem;
+  onRemove: () => void;
+}) {
+  return <AudioFileRow item={item} icon="🎙" onRemove={onRemove} />;
 }
 
 

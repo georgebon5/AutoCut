@@ -54,6 +54,9 @@ class JobCreateRequest(BaseModel):
     # of the narration via CLIP, pair them so the matching clip plays
     # during its matching sentence. No-op outside voiceover mode.
     semantic_match: bool = False
+    # Optional background music: upload_id of an audio file (mp3/wav/m4a).
+    # When set, the track is mixed under the voice with sidechain ducking.
+    music_upload_id: str | None = None
 
 
 class CreateUploadRequest(BaseModel):

@@ -36,6 +36,7 @@ _API_OPTION_KEYS = (
     "preset", "hook", "pacing", "zoom",
     "audio_enhance", "audio_denoise", "output_aspect",
     "semantic_match",
+    # music_path is a Path, handled specially in _options_to_json like voiceover_audio_path.
 )
 
 
@@ -62,6 +63,8 @@ def _options_to_json(opts: PipelineOptions) -> str:
     if opts.voiceover_audio_path is not None:
         data["voiceover_audio_path"] = str(opts.voiceover_audio_path)
         data["voiceover_mode"] = True   # display flag for the review UI
+    if opts.music_path is not None:
+        data["music_path"] = str(opts.music_path)
     return json.dumps(data)
 
 
@@ -130,6 +133,21 @@ def create_job(
                 detail=f"voiceover upload {body.voiceover_upload_id} not complete",
             )
         options.voiceover_audio_path = Path(vo_up.final_path)
+    # Music upload resolution — same lifecycle checks as voiceover.
+    if body.music_upload_id:
+        mu = session.get(Upload, body.music_upload_id)
+        if mu is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown music upload {body.music_upload_id}",
+            )
+        if mu.status != "complete" or mu.final_path is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"music upload {body.music_upload_id} not complete",
+            )
+        options.music_path = Path(mu.final_path)
+
     try:
         validate_options(options)
     except PipelineError as e:

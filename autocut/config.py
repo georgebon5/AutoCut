@@ -28,6 +28,26 @@ class RenderConfig(BaseModel):
     preset: str = "fast"
 
 
+class MusicConfig(BaseModel):
+    """Background music mix + sidechain ducking settings."""
+    # Volume when no voice is present (0–1, relative to source level).
+    baseline_volume: float = 0.15
+    # Sidechain compressor: how aggressively to duck the music while voice is
+    # heard. Higher ratio = deeper duck. 6:1 sounds natural; 12:1+ is more
+    # dramatic (podcast/ad style).
+    duck_ratio: float = 6.0
+    # Compressor attack/release in milliseconds. Fast attack (20–50ms) means
+    # the music dips before the voice is heard; slow release (1000–2000ms)
+    # lets it fade back in smoothly instead of snapping up.
+    attack_ms: float = 30.0
+    release_ms: float = 1500.0
+    # RMS threshold above which ducking kicks in. At 16-bit / -20dBFS voice
+    # levels, 0.02 catches normal speaking without triggering on room tone.
+    threshold: float = 0.02
+    # Duration of the fade-out at the very end of the video (seconds).
+    fadeout_duration_s: float = 3.0
+
+
 class TranscribeConfig(BaseModel):
     model_size: str = "medium"
     language: str = "el"
@@ -166,6 +186,7 @@ class AutoCutConfig(BaseModel):
     vad: VADConfig = Field(default_factory=VADConfig)
     silence: SilenceConfig = Field(default_factory=SilenceConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
+    music: MusicConfig = Field(default_factory=MusicConfig)
     transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)

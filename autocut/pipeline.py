@@ -79,6 +79,11 @@ class PipelineOptions:
     # heard. Opt-in because it costs a few seconds for the CLIP forward pass
     # and only makes sense when there are enough clips to actually choose.
     semantic_match: bool = False
+    # Optional background music track. When set, the music is mixed under the
+    # voice audio at render time with sidechain ducking so it auto-lowers while
+    # the speaker talks and returns to full volume in silent moments. Works in
+    # both normal mode and voiceover-vlog mode.
+    music_path: Path | None = None
 
 
 @dataclass
@@ -420,6 +425,8 @@ def run_pipeline(
                 audio_enhance=options.audio_enhance,
                 audio_denoise=options.audio_denoise,
                 output_aspect=options.output_aspect,
+                music_path=options.music_path,
+                music_cfg=cfg.music,
             )
         except RenderError as e:
             raise PipelineError(f"render failed: {e}") from e
@@ -689,6 +696,8 @@ def _run_voiceover_pipeline(
             audio_denoise=options.audio_denoise,
             output_aspect=options.output_aspect,
             clip_schedule=clip_schedule,
+            music_path=options.music_path,
+            music_cfg=cfg.music,
         )
     except RenderError as e:
         raise PipelineError(f"render failed: {e}") from e
