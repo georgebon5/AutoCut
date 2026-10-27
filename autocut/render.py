@@ -18,6 +18,11 @@ class _RenderSegment:
     ``zoom_end`` of 1.0 means no zoom (plain trim). ``zoom_end`` > 1.0 adds a
     linear crop+scale push-in from ``start_zoom`` to ``zoom_end`` across the
     segment's duration.
+
+    ``face_cx`` / ``face_cy`` are the normalised face centre used by the
+    aspect-crop filter when the output aspect differs from the source.
+    (0.5, 0.5) is the plain geometric centre — used when the clip has no
+    face or the user requested ``output_aspect="source"``.
     """
     video_path: Path
     audio_path: Optional[Path]      # None for B-roll (no audio)
@@ -25,6 +30,8 @@ class _RenderSegment:
     end: float
     zoom_end: float = 1.0
     start_zoom: float = 1.0
+    face_cx: float = 0.5
+    face_cy: float = 0.5
 
     @property
     def duration(self) -> float:
@@ -50,39 +57,71 @@ def _run(cmd: list[str], cwd: Path | None = None) -> None:
 def _audio_polish_chain(enhance: bool, denoise: bool) -> str:
     """ffmpeg filter chain to clean up the final audio track.
 
-    Order matters: denoise before compression (compressor would otherwise
-    amplify the noise floor during quiet frames); loudnorm last so the final
-    peak sits at a streaming-safe -1.5 dBTP target. Returns an empty string
-    when neither flag is set so callers can safely concat.
+    v2 chain (vs the previous highpass+comp+loudnorm):
+    - afftdn with tuned params + anlmdn for residual broadband noise
+    - highpass + lowpass bracketing the voice band (80 Hz – 12 kHz) kills
+      sub-rumble + ultrasonic hiss outside speech
+    - equalizer presence boost at ~3 kHz (voice intelligibility sweet spot)
+    - deesser pulls down harsh S/SH sibilance
+    - acompressor evens dynamics
+    - loudnorm as the final gain-staging to streaming-standard -14 LUFS
+
+    Order matters: denoise FIRST (so the compressor doesn't amplify noise
+    during quiet frames) and loudnorm LAST (so it measures the final mix).
     """
     parts: list[str] = []
     if denoise:
-        # afftdn: spectral subtraction. nr = noise reduction amount (dB),
-        # nf = assumed noise floor. These values work well on phone-recorded
-        # ambient hiss without chewing into the voice formants.
-        parts.append("afftdn=nr=12:nf=-25")
+        # Two-stage denoise:
+        #   afftdn — fast FFT spectral subtraction, catches constant ambient
+        #   anlmdn — Non-Local Means, catches broadband hiss/breath residue
+        # Combined they produce noticeably cleaner speech than either alone,
+        # especially on phone-recorded outdoor footage.
+        parts += [
+            "afftdn=nr=15:nf=-28:nt=w",
+            "anlmdn=s=0.001:p=0.003:r=0.01",
+        ]
     if enhance:
         parts += [
-            "highpass=f=80",            # cut rumble / mic handling
+            # Voice band isolation — anything above/below is noise or hum.
+            "highpass=f=80",
+            "lowpass=f=12000",
+            # Presence boost: +2 dB bell around 3 kHz where intelligibility
+            # consonants live (K/T/S formants).
+            "equalizer=f=3000:t=q:w=1.4:g=2",
+            # De-essing: tame harsh S/SH that otherwise feel brittle on
+            # earbuds after the loudnorm boost.
+            "deesser=i=0.5:m=0.5:f=0.5",
+            # Even dynamics: pulls shouts down, lifts whispers up.
             "acompressor=threshold=-20dB:ratio=3:attack=5:release=50",
-            "loudnorm=I=-14:TP=-1.5:LRA=11",  # streaming-standard loudness
+            # Streaming-standard loudness. Runs last so it sees the whole
+            # polished mix and picks one coherent gain for the full output.
+            "loudnorm=I=-14:TP=-1.5:LRA=11",
         ]
     return ",".join(parts)
 
 
-def _aspect_crop_chain(aspect: str) -> str:
-    """Center-crop filter to the requested output aspect.
+def _aspect_crop_chain(aspect: str, cx: float = 0.5, cy: float = 0.5) -> str:
+    """Face-aware crop to the requested output aspect.
 
-    "source" is a no-op. For 9:16 / 16:9 we compute the maximum centred box
-    that fits inside the source frame — if the source is already the target
-    ratio nothing visible changes. No scaling here; the fast_preview scale
-    comes later in the chain and operates on the cropped frame.
+    ``cx`` and ``cy`` are the horizontal / vertical centre as a ratio of the
+    source frame (0 = left/top, 1 = right/bottom). (0.5, 0.5) is plain
+    geometric centre. The crop window is clamped so it never slides past
+    the frame edge — a face at x=0 still produces a valid left-aligned
+    window instead of a negative offset.
+
+    "source" is a no-op.
     """
     if aspect == "9:16":
-        return "crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)'"
-    if aspect == "16:9":
-        return "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)'"
-    return ""
+        w_expr = "min(iw,ih*9/16)"
+    elif aspect == "16:9":
+        w_expr = "min(iw,ih*16/9)"
+    else:
+        return ""
+    h_expr = "min(ih,iw*16/9)" if aspect == "9:16" else "min(ih,iw*9/16)"
+    # Offset expressions: ideal centre - half window, clamped to [0, frame-window].
+    x_expr = f"max(0\\,min(iw-{w_expr}\\,iw*{cx:.4f}-{w_expr}/2))"
+    y_expr = f"max(0\\,min(ih-{h_expr}\\,ih*{cy:.4f}-{h_expr}/2))"
+    return f"crop=w='{w_expr}':h='{h_expr}':x='{x_expr}':y='{y_expr}'"
 
 
 def _zoom_filter(rs: _RenderSegment) -> str:
@@ -168,6 +207,13 @@ def _build_render_cmd(
         video_chain = f"[{vi}:v]setpts=PTS-STARTPTS"
         if rs.has_zoom:
             video_chain += "," + _zoom_filter(rs)
+        # Per-segment aspect crop with the proxy's face center. Each kept
+        # segment inherits its proxy's face position (same clip = same crop
+        # window); applying before concat means the output's crop follows
+        # the subject when they move between clips.
+        per_crop = _aspect_crop_chain(output_aspect, rs.face_cx, rs.face_cy)
+        if per_crop:
+            video_chain += "," + per_crop
         filters.append(f"{video_chain}[v{i}]")
 
         if ai is not None:
@@ -217,13 +263,8 @@ def _build_render_cmd(
         filters.append(f"{audio_out}{polish}[apolished]")
         audio_out = "[apolished]"
 
-    # Aspect-ratio center-crop (optional) runs before any scale/subs filter
-    # so the preview downscale and subtitle rendering happen on the final
-    # cropped frame — no wasted pixels, no re-cropped captions.
-    crop_chain = _aspect_crop_chain(output_aspect)
-    if crop_chain:
-        filters.append(f"{video_pre_subs}{crop_chain}[vcropped]")
-        video_pre_subs = "[vcropped]"
+    # Aspect-ratio crop is applied per-segment above (so each clip's face
+    # position is respected). Nothing left to do here.
 
     # In fast_preview mode, cap the long edge at 720px before anything else
     # downstream. On 1080p/4K phone footage this ~4-9x fewer pixels for the
@@ -374,14 +415,29 @@ def render_voiceover_vlog(
     vo_in = len(proxies)
     cmd += ["-i", str(voiceover_audio_path.resolve())]
 
+    # Face centres per visual clip for aspect-crop. Reused across the
+    # concat so each B-roll clip keeps the subject in-shot even when the
+    # output aspect differs from the source.
+    face_centers: dict[str, tuple[float, float]] = {}
+    if output_aspect != "source":
+        from autocut.face_tracking import estimate_face_center
+        for p in proxies:
+            face_centers[p.clip_id] = estimate_face_center(p.proxy_path)
+
     filters: list[str] = []
     N = len(proxies)
 
     # Video chain: drop each clip's audio, concat all visuals, cap to the
     # final audio duration via trim (last frame holds if video is shorter
-    # thanks to tpad=stop_mode=clone).
-    for i in range(N):
-        filters.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+    # thanks to tpad=stop_mode=clone). Per-clip aspect crop is applied up
+    # front so each clip's face position is honoured in the final crop.
+    for i, p in enumerate(proxies):
+        chain = f"[{i}:v]setpts=PTS-STARTPTS"
+        cx, cy = face_centers.get(p.clip_id, (0.5, 0.5))
+        crop = _aspect_crop_chain(output_aspect, cx, cy)
+        if crop:
+            chain += "," + crop
+        filters.append(f"{chain}[v{i}]")
     if N == 1:
         video_pre = "[v0]"
     else:
@@ -413,10 +469,7 @@ def render_voiceover_vlog(
         filters.append(f"{audio_out_label}{polish}[apolished]")
         audio_out_label = "[apolished]"
 
-    crop_chain = _aspect_crop_chain(output_aspect)
-    if crop_chain:
-        filters.append(f"{video_pre}{crop_chain}[vcropped]")
-        video_pre = "[vcropped]"
+    # Aspect crop handled per-input above; nothing to do here.
 
     # Scale for preview, optional subs overlay (same policy as the main
     # render path keeps libass drawing onto final-size frames).
@@ -577,9 +630,19 @@ def render(
             return 1.0
         return zoom.end_zoom
 
+    # Compute face centre once per proxy — reused by every segment from that
+    # clip. Skipped when the user kept the source aspect (no crop → nothing
+    # to centre on).
+    face_centers: dict[str, tuple[float, float]] = {}
+    if output_aspect != "source":
+        from autocut.face_tracking import estimate_face_center
+        for p in proxies:
+            face_centers[p.clip_id] = estimate_face_center(p.proxy_path)
+
     def _to_render_segment(s: Segment, allow_zoom: bool) -> _RenderSegment:
         zoom_end = _zoom_for(s) if allow_zoom else 1.0
         start_zoom = zoom.start_zoom if (zoom is not None and zoom_end > 1.0) else 1.0
+        cx, cy = face_centers.get(s.clip_id, (0.5, 0.5))
         return _RenderSegment(
             video_path=proxy_by_id[s.clip_id].proxy_path,
             audio_path=proxy_by_id[s.clip_id].audio_path,
@@ -587,6 +650,8 @@ def render(
             end=s.end,
             zoom_end=zoom_end,
             start_zoom=start_zoom,
+            face_cx=cx,
+            face_cy=cy,
         )
 
     kept_render: list[_RenderSegment] = [

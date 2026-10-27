@@ -158,12 +158,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _karaoke_text(group: list[WordTimestamp], line_start: float) -> str:
-    """Build ASS karaoke text with \\k tags (duration in cs from previous tag end)."""
+    """Build ASS karaoke text with \\k tags (duration in cs from previous tag end).
+
+    Each word also gets a scale-and-settle animation (\\t transform) that
+    briefly pops to 115% at the moment it's spoken, then eases back to
+    100% over 180 ms. This is the TikTok-style "word reveal" look that
+    plays into the karaoke highlight — much more alive than a static
+    caption. Line-local timestamps are in ms (ASS \\t uses ms).
+    """
     parts: list[str] = []
     prev_end = line_start
     for w in group:
         cs = max(1, round((w.end - prev_end) * 100))
-        parts.append(f"{{\\k{cs}}}{w.word.strip()}")
+        # Milliseconds from the Dialogue's Start — that's the clock \t uses.
+        word_ms = int(round((w.start - line_start) * 1000))
+        pop_end = word_ms + 90        # 90 ms rise
+        settle_end = word_ms + 270    # 180 ms ease back
+        anim = (
+            f"\\t({word_ms},{pop_end},\\fscx115\\fscy115)"
+            f"\\t({pop_end},{settle_end},\\fscx100\\fscy100)"
+        )
+        parts.append(f"{{\\k{cs}{anim}}}{w.word.strip()}")
         prev_end = w.end
     return " ".join(parts)
 
