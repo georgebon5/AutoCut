@@ -62,6 +62,46 @@ def collect_from_eval(edl: EDL, eval_result: EvalResult) -> list[TrainingExample
     return out
 
 
+def collect_from_override_rows(
+    overrides: Iterable[Any],       # SegmentOverride-like rows (with features_json)
+) -> list[TrainingExample]:
+    """Build training examples directly from SegmentOverride DB rows.
+
+    Unlike ``collect_from_overrides``, this does NOT require the EDL — the
+    DB row is self-contained: ``features_json`` holds the snapshot of segment
+    features taken at override time.  Multiple flips for the same segment are
+    resolved to the LAST decision (the one the editor shipped with).
+    """
+    import json as _json
+
+    rows = sorted(overrides, key=lambda r: (r.created_at, r.id))
+    first_auto: dict[tuple, str] = {}
+    final_decision: dict[tuple, str] = {}
+    last_features: dict[tuple, dict] = {}
+
+    for r in rows:
+        key = (r.job_id, r.preset, r.segment_index)
+        first_auto.setdefault(key, r.previous_decision)
+        final_decision[key] = r.new_decision
+        try:
+            last_features[key] = _json.loads(r.features_json) if r.features_json else {}
+        except Exception:   # noqa: BLE001
+            last_features[key] = {}
+
+    out: list[TrainingExample] = []
+    for key, decision in final_decision.items():
+        features = _floats(last_features.get(key, {}))
+        if not features:
+            continue
+        out.append(TrainingExample(
+            features=features,
+            label=1 if decision == "keep" else 0,
+            auto_decision=first_auto.get(key, decision),
+            source="user",
+        ))
+    return out
+
+
 def collect_from_overrides(
     edl: EDL,
     overrides: Iterable[Any],       # SegmentOverride-like rows

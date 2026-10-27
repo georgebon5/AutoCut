@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autocut.edl import edl_to_dict, load_edl, save_edl
@@ -92,6 +93,7 @@ def get_edl(
 
 @router.patch("/{job_id}/segments/{index}", response_model=SegmentResponse)
 def patch_segment(
+    request: Request,
     job_id: str,
     index: int,
     update: SegmentUpdate,
@@ -139,6 +141,16 @@ def patch_segment(
     seg.reasons.append(f"user {update.decision}")
     save_edl(edl, path)
     session.commit()
+
+    # After committing, maybe trigger a background retrain.
+    override_count = session.scalar(
+        select(func.count()).select_from(SegmentOverride)
+    ) or 0
+    cfg = getattr(request.app.state, "config", None)
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if cfg is not None and session_factory is not None:
+        from autocut_api.routes.train import maybe_auto_train
+        maybe_auto_train(override_count, session_factory, cfg)
 
     return SegmentResponse(
         index=index,

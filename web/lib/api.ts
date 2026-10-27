@@ -17,6 +17,8 @@ import type {
   OverridesListResponse,
   SegmentResponse,
   SegmentUpdate,
+  TrainResult,
+  TrainStatus,
   Upload,
   WordResponse,
 } from "./api.types";
@@ -193,3 +195,12 @@ export const exportFcpxmlUrl = (jobId: string, preset?: string) => {
 
 export const listOverrides = (jobId: string) =>
   request<OverridesListResponse>(`/jobs/${jobId}/overrides`);
+
+// ---------------------------------------------------------------------------
+// Adaptive learning — training status + manual trigger
+// ---------------------------------------------------------------------------
+
+export const getTrainStatus = () => request<TrainStatus>("/train/status");
+
+export const triggerTrain = () =>
+  request<TrainResult>("/train", { method: "POST" });

@@ -195,6 +195,28 @@ export interface OverridesListResponse {
   overrides: OverrideRecord[];
 }
 
+export interface TrainStatus {
+  n_overrides: number;
+  model_active: boolean;
+  last_trained_at: string | null;  // ISO 8601
+  model_f1: number | null;
+  heuristic_f1: number | null;
+  beats_baseline: boolean | null;
+  n_examples: number | null;
+  auto_train_threshold: number;
+}
+
+export interface TrainResult {
+  n_examples: number;
+  n_train: number;
+  n_test: number;
+  model_f1: number;
+  heuristic_f1: number;
+  beats_baseline: boolean;
+  deployed: boolean;
+  message: string;
+}
+
 export interface CaptionStyle {
   font?: string;
   size?: number;

@@ -81,6 +81,29 @@ class SegmentOverride(Base):
     )
 
 
+class TrainingRun(Base):
+    """One row per completed auto-training run.
+
+    Provides an audit trail of when the model was retrained, how many
+    examples it saw, and whether it beat the heuristic baseline on the
+    held-out test split.  The latest row whose ``deployed`` flag is True
+    is the currently active model.
+    """
+    __tablename__ = "training_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    n_examples: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_train: Mapped[int] = mapped_column(Integer, nullable=False)
+    n_test: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_f1: Mapped[float] = mapped_column(Float, nullable=False)
+    heuristic_f1: Mapped[float] = mapped_column(Float, nullable=False)
+    beats_baseline: Mapped[bool] = mapped_column(nullable=False)
+    deployed: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow_naive, nullable=False
+    )
+
+
 # Valid upload statuses: pending → uploading → complete | failed
 UPLOAD_STATUSES = ("pending", "uploading", "complete", "failed")
 

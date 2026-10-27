@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
-import { ApiError, deleteJob, listJobs } from "@/lib/api";
-import type { Job } from "@/lib/api.types";
+import { ApiError, deleteJob, getTrainStatus, listJobs, triggerTrain } from "@/lib/api";
+import type { Job, TrainStatus } from "@/lib/api.types";
 
 /** Only running jobs need live polling; terminal jobs are checked less often. */
 function usePollingInterval(jobs: Job[] | undefined): number | false {
@@ -35,6 +35,8 @@ export default function HomePage() {
       >
         + Ανέβασε clips
       </Link>
+
+      <IntelligencePanel />
 
       <section>
         <h2 className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
@@ -207,5 +209,97 @@ function StatusChip({ status }: { status: Job["status"] }) {
     <span className={`rounded-full border px-2 py-0.5 text-[11px] tracking-wide ${colors[status]}`}>
       {STATUS_LABEL[status]}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Intelligence panel — shows adaptive model status + manual retrain trigger
+// ---------------------------------------------------------------------------
+
+function IntelligencePanel() {
+  const qc = useQueryClient();
+  const status = useQuery({
+    queryKey: ["train-status"],
+    queryFn: getTrainStatus,
+    refetchInterval: 30_000,
+  });
+
+  const trainMut = useMutation({
+    mutationFn: triggerTrain,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["train-status"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+
+  const s: TrainStatus | undefined = status.data;
+  if (!s) return null;
+
+  const pct = s.auto_train_threshold > 0
+    ? Math.min(100, Math.round((s.n_overrides % s.auto_train_threshold) / s.auto_train_threshold * 100))
+    : 0;
+  const nextIn = s.auto_train_threshold - (s.n_overrides % s.auto_train_threshold);
+
+  return (
+    <section className="glass-card rounded-2xl p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/50">
+            Intelligence
+          </p>
+          <p className="mt-0.5 text-sm text-white/80">
+            {s.model_active ? (
+              <>
+                Μοντέλο ενεργό
+                {s.model_f1 != null && (
+                  <span className="ml-2 text-xs text-white/40">
+                    F1 {s.model_f1.toFixed(2)} vs {s.heuristic_f1?.toFixed(2)} heuristic
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-white/40">Χωρίς εκπαιδευμένο μοντέλο</span>
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={trainMut.isPending || s.n_overrides < 4}
+          onClick={() => trainMut.mutate()}
+          title={s.n_overrides < 4 ? "Χρειάζονται τουλάχιστον 4 overrides για εκπαίδευση" : "Εκπαίδευσε τώρα"}
+          className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 transition hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {trainMut.isPending ? "Εκπαιδεύεται…" : "Εκπαίδευσε"}
+        </button>
+      </div>
+
+      <div className="mt-4 space-y-1.5">
+        <div className="flex justify-between text-[11px] text-white/30">
+          <span>{s.n_overrides} overrides συνολικά</span>
+          {s.n_overrides >= 4 && (
+            <span>επόμενη αυτόματη εκπαίδευση σε {nextIn}</span>
+          )}
+        </div>
+        <div className="h-1 w-full overflow-hidden rounded-full bg-white/5">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-700"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      {trainMut.isSuccess && (
+        <p className={`mt-3 text-xs ${trainMut.data.deployed ? "text-emerald-300" : "text-white/40"}`}>
+          {trainMut.data.deployed
+            ? `Αναπτύχθηκε — F1 ${trainMut.data.model_f1.toFixed(2)}`
+            : `Δεν αναπτύχθηκε (heuristic καλύτερο)`}
+        </p>
+      )}
+      {trainMut.isError && (
+        <p className="mt-3 text-xs text-red-300">
+          {(trainMut.error as ApiError | Error).message}
+        </p>
+      )}
+    </section>
   );
 }
