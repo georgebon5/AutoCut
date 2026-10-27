@@ -16,7 +16,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
 from autocut.config import AutoCutConfig
@@ -26,7 +26,7 @@ from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.hook import find_hook_segment
 from autocut.ingest import IngestError, ingest_clips, normalize_voiceover
 from autocut.keywords import enrich_segments_keywords
-from autocut.models import ProxyInfo, RenderChunk, Segment, SpeechRegion, Transcript
+from autocut.models import ProxyInfo, RenderChunk, Segment, SpeechRegion, Transcript, WordTimestamp
 from autocut.motion import enrich_segments_motion
 from autocut.render import RenderError, render, render_voiceover_vlog
 from autocut.scenes import detect_scene_boundaries, enrich_segments_scenes
@@ -475,6 +475,71 @@ def run_pipeline(
 _VOICEOVER_CLIP_ID = "voiceover"
 
 
+def _sentences_for_clip_matching(
+    kept_segs: list[Segment],
+    transcript: Transcript,
+    vo_wav: Path,
+    tr_cfg: Any,
+    rep: PipelineReporter,
+) -> list[str]:
+    """Produce per-segment text in **English** for CLIP matching.
+
+    CLIP's text encoder is trained predominantly on English — Greek text
+    embeddings land far from the matching visual concepts. We lean on
+    Whisper's built-in ``task="translate"`` (any-language-to-English) to
+    get aligned English segments at the SAME timestamps, then group words
+    the same way we group the Greek transcript by kept segment.
+
+    If translation fails or the voiceover is already English, we fall back
+    to the Greek word join — CLIP will still match proper nouns and the
+    user gets some pairing instead of nothing.
+    """
+    import numpy as np
+    try:
+        from faster_whisper import WhisperModel
+        import librosa
+    except ImportError:
+        return _group_words_by_segment(kept_segs, transcript.words)
+
+    try:
+        model = load_whisper_model(tr_cfg)
+        audio = np.asarray(librosa.load(str(vo_wav), sr=16000, mono=True)[0], dtype=np.float32)
+        segs_iter, _info = model.transcribe(
+            audio, task="translate", word_timestamps=True,
+            beam_size=tr_cfg.beam_size, vad_filter=True,
+        )
+        en_words: list[tuple[float, str]] = []
+        for seg in segs_iter:
+            if not seg.words:
+                continue
+            for w in seg.words:
+                en_words.append((w.start, w.word))
+        if not en_words:
+            raise RuntimeError("empty translation")
+    except Exception as e:   # noqa: BLE001 — fall back to greek words
+        rep.info(f"english translation failed ({type(e).__name__}): using greek text")
+        return _group_words_by_segment(kept_segs, transcript.words)
+
+    # Group English words by kept segment boundaries (same timeline, so
+    # start-time comparisons match the Greek words we already segmented).
+    out: list[str] = []
+    for s in kept_segs:
+        words = [w for t, w in en_words if s.start <= t < s.end]
+        out.append(" ".join(words).strip() or "(scene)")
+    rep.info(f"english translation: {sum(len(x.split()) for x in out)} words for CLIP")
+    return out
+
+
+def _group_words_by_segment(
+    kept_segs: list[Segment], words: list[WordTimestamp],
+) -> list[str]:
+    out: list[str] = []
+    for s in kept_segs:
+        joined = " ".join(w.word for w in words if s.start <= w.start < s.end).strip()
+        out.append(joined or "(scene)")
+    return out
+
+
 def _run_voiceover_pipeline(
     clips: list[Path],
     output_dir: Path,
@@ -566,19 +631,21 @@ def _run_voiceover_pipeline(
             from autocut.semantic import (
                 match_sentences_to_clips, visual_embeddings,
             )
-            # Build per-segment sentence text by joining the transcript words
-            # whose timestamps fall inside each kept voiceover segment.
             kept_segs = [s for s in segments if s.decision == "keep"]
-            sentences: list[str] = []
-            for s in kept_segs:
-                words = [w.word for w in transcript.words
-                         if s.start <= w.start < s.end]
-                sentences.append(" ".join(words).strip() or "(silence)")
+            sentences = _sentences_for_clip_matching(
+                kept_segs, transcript, vo_wav, cfg.transcribe, rep,
+            )
             vis_embeds = visual_embeddings(
                 {p.clip_id: p.proxy_path for p in proxies}
             )
             if vis_embeds:
-                clip_schedule = match_sentences_to_clips(sentences, vis_embeds)
+                clip_durs = {p.clip_id: p.duration for p in proxies}
+                seg_durs = [s.duration for s in kept_segs]
+                clip_schedule = match_sentences_to_clips(
+                    sentences, vis_embeds,
+                    clip_durations=clip_durs,
+                    segment_durations=seg_durs,
+                )
                 rep.info(
                     f"semantic schedule: "
                     f"{len(set(clip_schedule))} unique clip(s) across "
