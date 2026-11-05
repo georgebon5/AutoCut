@@ -26,8 +26,11 @@ interface Props {
   onSeekRequest?: (outputTime: number) => void;
 }
 
+type Filter = "all" | "keep" | "cut";
+
 export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
 
   // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
   // replay it. Using a ref avoids stale-closure issues in event handlers;
@@ -62,6 +65,18 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
     });
     return map;
   }, [edl.segments]);
+
+  // Ordered list of segment indices that pass the current filter (clip order,
+  // then position within clip). Used to scope J/L keyboard navigation.
+  const filteredSegmentOrder = useMemo(() => {
+    const result: number[] = [];
+    for (const clip of edl.clips) {
+      for (const { seg, index } of (bySegmentIndex.get(clip.clip_id) ?? [])) {
+        if (filter === "all" || seg.decision === filter) result.push(index);
+      }
+    }
+    return result;
+  }, [edl.clips, bySegmentIndex, filter]);
 
   const toggleMut = useSegmentToggle(jobId, preset);
   const batchMut = useBatchToggle(jobId, preset);
@@ -111,14 +126,14 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
       // Modifier keys guard — don't intercept Ctrl+J etc.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      const total = edl.segments.length;
-      if (total === 0) return;
+      if (filteredSegmentOrder.length === 0) return;
 
-      // j/l navigate; d/x/Delete/Backspace toggle keep/cut of current.
+      // j/l navigate within the current filter; d/x/Delete/Backspace toggle.
       if (e.key === "j" || e.key === "J" || e.key === "ArrowLeft") {
         e.preventDefault();
         setSelected((s) => {
-          const next = s === null ? 0 : Math.max(0, s - 1);
+          const pos = s === null ? 0 : Math.max(0, filteredSegmentOrder.indexOf(s) - 1);
+          const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[0]!;
           const ot = outputStartBySegment.get(next);
           if (ot !== undefined) onSeekRequest?.(ot);
           return next;
@@ -126,7 +141,9 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
       } else if (e.key === "l" || e.key === "L" || e.key === "ArrowRight") {
         e.preventDefault();
         setSelected((s) => {
-          const next = s === null ? 0 : Math.min(total - 1, s + 1);
+          const cur = s === null ? -1 : filteredSegmentOrder.indexOf(s);
+          const pos = Math.min(filteredSegmentOrder.length - 1, cur + 1);
+          const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[filteredSegmentOrder.length - 1]!;
           const ot = outputStartBySegment.get(next);
           if (ot !== undefined) onSeekRequest?.(ot);
           return next;
@@ -148,12 +165,15 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, selected, toggleMut, onDirty, handleUndo, pushUndo]);
+  }, [edl.segments, filteredSegmentOrder, selected, toggleMut, onDirty, handleUndo, pushUndo]);
 
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <StatsBar stats={stats} />
+        <div className="flex flex-wrap items-center gap-3">
+          <StatsBar stats={stats} />
+          <FilterToggle value={filter} stats={stats} onChange={setFilter} />
+        </div>
         <BulkActions
           segments={edl.segments}
           batchMut={batchMut}
@@ -176,12 +196,19 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
               onSeekRequest={onSeekRequest}
             />
           ) : null}
-          {edl.clips.map((clip) => (
+          {edl.clips.map((clip) => {
+            const allItems = bySegmentIndex.get(clip.clip_id) ?? [];
+            const visibleItems = allItems.filter(
+              ({ seg, index }) =>
+                filter === "all" || seg.decision === filter || index === selected,
+            );
+            if (visibleItems.length === 0) return null;
+            return (
             <ClipRow
               key={clip.clip_id}
               jobId={jobId}
               clip={clip}
-              items={bySegmentIndex.get(clip.clip_id) ?? []}
+              items={visibleItems}
               selectedIndex={selected}
               onSelect={selectAndSeek}
               onToggle={(index, decision) => {
@@ -191,7 +218,8 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
                 onDirty?.();
               }}
             />
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -516,6 +544,42 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+
+function FilterToggle({
+  value,
+  stats,
+  onChange,
+}: {
+  value: Filter;
+  stats: { keep: number; cut: number };
+  onChange: (f: Filter) => void;
+}) {
+  const opts: { f: Filter; label: string; count: number }[] = [
+    { f: "all",  label: "Όλα",   count: stats.keep + stats.cut },
+    { f: "keep", label: "Μέσα",  count: stats.keep },
+    { f: "cut",  label: "Έξω",   count: stats.cut },
+  ];
+  return (
+    <div className="inline-flex gap-0.5 rounded-lg border border-white/8 bg-black/20 p-0.5">
+      {opts.map(({ f, label, count }) => (
+        <button
+          key={f}
+          type="button"
+          onClick={() => onChange(f)}
+          className={[
+            "rounded-md px-2.5 py-0.5 text-[11px] font-medium transition",
+            value === f
+              ? "bg-white/10 text-white/90"
+              : "text-white/35 hover:text-white/60",
+          ].join(" ")}
+        >
+          {label} <span className="font-mono opacity-60">{count}</span>
+        </button>
+      ))}
     </div>
   );
 }
