@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
@@ -101,8 +101,12 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   const toggleMut = useSegmentToggle(jobId, preset);
   const editMut = useWordEdit(jobId, preset);
   const [mode, setMode] = useState<Mode>("toggle");
-  // Which word is currently being edited: (clipId, wordIndex) tuple.
   const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
+
+  // ── Search state ──────────────────────────────────────────────────────────
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeMatchIdx, setActiveMatchIdx] = useState(0);
 
   // Find which word is currently playing based on the video's output time.
   const activeWord = useMemo(() => {
@@ -117,6 +121,62 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     if (idx < 0) return null;
     return { clipId: src.clipId, wordIndex: idx };
   }, [currentTime, edl]);
+
+  // All assignments that match the current search query, in transcript order.
+  const matchList = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    const result: { clipId: string; wordIndex: number; word: WordTimestamp }[] = [];
+    for (const t of edl.transcripts) {
+      t.words.forEach((w, wordIndex) => {
+        if (w.word.toLowerCase().includes(q)) {
+          result.push({ clipId: t.clip_id, wordIndex, word: w });
+        }
+      });
+    }
+    return result;
+  }, [searchQuery, edl.transcripts]);
+
+  // Key of the currently focused match: "clipId:wordIndex".
+  const currentMatchKey =
+    matchList.length > 0
+      ? `${matchList[activeMatchIdx]?.clipId}:${matchList[activeMatchIdx]?.wordIndex}`
+      : null;
+
+  // Navigate to a match: update index and seek the player.
+  const goToMatch = useCallback(
+    (idx: number) => {
+      const match = matchList[idx];
+      if (!match) return;
+      setActiveMatchIdx(idx);
+      const ot = sourceToOutput(match.clipId, match.word.start, edl);
+      if (ot !== null) onSeekRequest?.(ot);
+    },
+    [matchList, edl, onSeekRequest],
+  );
+
+  // Ctrl/Cmd+F opens the transcript search bar.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        const target = e.target as HTMLElement | null;
+        // Don't intercept when user is typing in a word editor.
+        if (target?.closest("[data-transcript]")) {
+          e.preventDefault();
+          setShowSearch(true);
+        }
+      }
+      if (e.key === "Escape" && showSearch) {
+        setShowSearch(false);
+        setSearchQuery("");
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [showSearch]);
+
+  // Reset match index when query changes.
+  useEffect(() => { setActiveMatchIdx(0); }, [searchQuery]);
 
   // Group assignments by clip for display, preserving transcript word order.
   const groupedByClip = useMemo(() => {
@@ -155,13 +215,40 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
       : "Κείμενο · πάτα μία λέξη για να κόψεις/κρατήσεις το κομμάτι της";
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3" data-transcript>
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
           {headerHint}
         </h2>
-        <ModeToggle value={mode} onChange={(m) => { setMode(m); setEditing(null); }} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowSearch((v) => !v)}
+            title="Αναζήτηση στο κείμενο (Ctrl+F)"
+            className={[
+              "rounded border px-1.5 py-0.5 font-mono text-xs transition",
+              showSearch
+                ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200"
+                : "border-white/10 bg-white/5 text-white/35 hover:border-white/20 hover:text-white/60",
+            ].join(" ")}
+          >
+            ⌕
+          </button>
+          <ModeToggle value={mode} onChange={(m) => { setMode(m); setEditing(null); }} />
+        </div>
       </div>
+
+      {showSearch ? (
+        <SearchBar
+          query={searchQuery}
+          matchCount={matchList.length}
+          activeIdx={activeMatchIdx}
+          onQueryChange={(q) => setSearchQuery(q)}
+          onPrev={() => goToMatch((activeMatchIdx - 1 + matchList.length) % matchList.length)}
+          onNext={() => goToMatch((activeMatchIdx + 1) % matchList.length)}
+          onClose={() => { setShowSearch(false); setSearchQuery(""); }}
+        />
+      ) : null}
 
       <div className="glass-card flex max-h-80 flex-col gap-4 overflow-y-auto rounded-2xl p-5">
         {edl.transcripts.map((t) => (
@@ -172,6 +259,8 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             assignments={groupedByClip.get(t.clip_id) ?? []}
             selectedIndex={selectedIndex ?? null}
             activeWord={activeWord}
+            searchQuery={searchQuery}
+            currentMatchKey={currentMatchKey}
             mode={mode}
             editing={editing}
             onStartEdit={(clipId, wordIndex) => setEditing({ clipId, wordIndex })}
@@ -207,6 +296,95 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
         </p>
       ) : null}
     </section>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Search bar
+// ---------------------------------------------------------------------------
+
+function SearchBar({
+  query,
+  matchCount,
+  activeIdx,
+  onQueryChange,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  query: string;
+  matchCount: number;
+  activeIdx: number;
+  onQueryChange: (q: string) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const hasQuery = query.trim() !== "";
+  const countLabel = hasQuery
+    ? matchCount === 0
+      ? "0 αποτελέσματα"
+      : `${activeIdx + 1} / ${matchCount}`
+    : "";
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2">
+      <span className="font-mono text-xs text-fuchsia-300/60">⌕</span>
+      <input
+        ref={inputRef}
+        type="search"
+        value={query}
+        placeholder="Αναζήτηση λέξης…"
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.shiftKey ? onPrev() : onNext();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+          }
+        }}
+        className="min-w-0 flex-1 bg-transparent text-sm text-white/90 placeholder-white/25 outline-none"
+      />
+      {hasQuery ? (
+        <span className="shrink-0 font-mono text-[11px] text-fuchsia-300/60">
+          {countLabel}
+        </span>
+      ) : null}
+      <div className="flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={matchCount === 0}
+          title="Προηγούμενο (Shift+Enter)"
+          className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={matchCount === 0}
+          title="Επόμενο (Enter)"
+          className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Κλείσιμο (Esc)"
+          className="ml-1 rounded p-1 text-white/30 transition hover:text-white/70"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -247,6 +425,8 @@ function ClipTranscript({
   assignments,
   selectedIndex,
   activeWord,
+  searchQuery,
+  currentMatchKey,
   mode,
   editing,
   onStartEdit,
@@ -260,6 +440,8 @@ function ClipTranscript({
   assignments: WordAssignment[];
   selectedIndex: number | null;
   activeWord: { clipId: string; wordIndex: number } | null;
+  searchQuery: string;
+  currentMatchKey: string | null;
   mode: Mode;
   editing: { clipId: string; wordIndex: number } | null;
   onStartEdit: (clipId: string, wordIndex: number) => void;
@@ -269,9 +451,19 @@ function ClipTranscript({
   onSelect: (segIndex: number) => void;
 }) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  const searchRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
     activeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [activeWord?.clipId, activeWord?.wordIndex]);
+
+  // Scroll to current search match when it lands in this transcript.
+  useEffect(() => {
+    if (!currentMatchKey) return;
+    const [matchClipId] = currentMatchKey.split(":");
+    if (matchClipId !== transcript.clip_id) return;
+    searchRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [currentMatchKey, transcript.clip_id]);
   if (assignments.length === 0) return null;
 
   return (
@@ -302,10 +494,15 @@ function ClipTranscript({
           }
           const isPlaying =
             activeWord?.clipId === a.clipId && activeWord?.wordIndex === a.wordIndex;
+          const wordKey = `${a.clipId}:${a.wordIndex}`;
+          const isCurrentMatch = currentMatchKey === wordKey;
+          const isMatch =
+            searchQuery.trim() !== "" &&
+            a.word.word.toLowerCase().includes(searchQuery.trim().toLowerCase());
           return (
             <button
               key={i}
-              ref={isPlaying ? activeRef : undefined}
+              ref={isPlaying ? activeRef : isCurrentMatch ? searchRef : undefined}
               type="button"
               onClick={() => {
                 if (mode === "edit") {
@@ -322,6 +519,11 @@ function ClipTranscript({
                   : "text-white/35 line-through hover:bg-white/5",
                 active ? "ring-1 ring-fuchsia-400/70" : "",
                 isPlaying ? "bg-amber-400/30 ring-1 ring-amber-400/60 text-amber-100" : "",
+                isCurrentMatch
+                  ? "bg-fuchsia-400/40 ring-1 ring-fuchsia-400/70 text-fuchsia-100"
+                  : isMatch
+                  ? "bg-fuchsia-400/15 text-fuchsia-200"
+                  : "",
                 mode === "edit" ? "cursor-text hover:bg-cyan-400/20" : "",
               ].join(" ")}
             >
