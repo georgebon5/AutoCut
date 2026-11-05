@@ -53,6 +53,7 @@ export default function UploadForm() {
   const [outputAspect, setOutputAspect] = useState<"source" | "9:16" | "16:9">("source");
   const [semanticMatch, setSemanticMatch] = useState(false);
   const [transition, setTransition] = useState<"none" | "fade" | "fadeblack" | "fadewhite">("none");
+  const [webhookUrl, setWebhookUrl] = useState("");
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -171,6 +172,7 @@ export default function UploadForm() {
         music_upload_id:
           music?.state === "complete" && music.uploadId ? music.uploadId : undefined,
         transition: transition !== "none" ? transition : undefined,
+        webhook_url: webhookUrl.trim() || undefined,
       });
       router.push("/");
     } catch (e) {
@@ -420,6 +422,22 @@ export default function UploadForm() {
           )}
         </div>
       </fieldset>
+
+      <div className="glass-card flex flex-col gap-2 rounded-2xl p-4">
+        <label className="flex flex-col gap-1.5 text-sm">
+          <span className="text-white/60">
+            Webhook URL{" "}
+            <span className="text-white/35">(προαιρετικό · POST όταν τελειώσει το job)</span>
+          </span>
+          <input
+            type="url"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder="https://hooks.example.com/notify"
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm placeholder-white/20 transition focus:border-cyan-400/50 focus:outline-none"
+          />
+        </label>
+      </div>
 
       {jobError ? (
         <p className="text-sm text-red-300/90">{jobError}</p>

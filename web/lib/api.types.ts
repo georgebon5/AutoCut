@@ -57,6 +57,7 @@ export interface JobCreateRequest {
   semantic_match?: boolean;
   music_upload_id?: string;
   transition?: TransitionType;
+  webhook_url?: string;
 }
 
 export interface Upload {

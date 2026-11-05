@@ -56,6 +56,7 @@ from autocut.render import RenderError, burn_subtitles, render  # noqa: F401
 from autocut.render import _has_subtitles_filter
 from autocut_api.jobs import update_job
 from autocut_api.models import Job
+from autocut_api import webhook as _webhook
 
 log = logging.getLogger("autocut_api.pipeline_bridge")
 
@@ -96,6 +97,7 @@ def _load_options(session_factory: sessionmaker, job_id: str) -> PipelineOptions
     voiceover_path_str = data.pop("voiceover_audio_path", None)
     data.pop("voiceover_mode", None)
     music_path_str = data.pop("music_path", None)
+    data.pop("webhook_url", None)
     options = PipelineOptions(**data)
     if model_path_str:
         options.model_path = Path(model_path_str)
@@ -118,6 +120,12 @@ def run_api_pipeline(
     populated at job creation time from the HTTP request.
     """
     reporter = JobReporter(session_factory, job_id)
+    # Read webhook URL before _load_options (which strips it from config_json).
+    with session_factory() as _s:
+        _job = _s.get(Job, job_id)
+        _raw = _job.config_json if _job else None
+    webhook_url: str = json.loads(_raw).get("webhook_url", "") if _raw else ""
+
     try:
         cfg = load_config()
         options = _load_options(session_factory, job_id)
@@ -126,17 +134,21 @@ def run_api_pipeline(
             session_factory, job_id,
             status="done", stage="complete", progress=1.0,
         )
+        _webhook.fire(webhook_url, job_id, "done")
     except PipelineError as e:
         update_job(
             session_factory, job_id,
             status="failed", stage="error", error=str(e),
         )
+        _webhook.fire(webhook_url, job_id, "failed", str(e))
     except Exception as e:   # noqa: BLE001 — surface any crash to the client
         log.exception("pipeline crashed for job %s", job_id)
+        err = f"{type(e).__name__}: {e}"
         update_job(
             session_factory, job_id,
-            status="failed", stage="error", error=f"{type(e).__name__}: {e}",
+            status="failed", stage="error", error=err,
         )
+        _webhook.fire(webhook_url, job_id, "failed", err)
 
 
 def rerender_from_edl(

@@ -70,6 +70,15 @@ def _options_to_json(opts: PipelineOptions) -> str:
     return json.dumps(data)
 
 
+def _add_webhook_url(config_json: str, webhook_url: str | None) -> str:
+    """Inject webhook_url into an already-serialised config_json string."""
+    if not webhook_url:
+        return config_json
+    data = json.loads(config_json)
+    data["webhook_url"] = webhook_url
+    return json.dumps(data)
+
+
 def _job_response(job: Job) -> JobResponse:
     config = json.loads(job.config_json) if job.config_json else None
     return JobResponse(
@@ -155,7 +164,7 @@ def create_job(
     except PipelineError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    job = Job(config_json=_options_to_json(options))
+    job = Job(config_json=_add_webhook_url(_options_to_json(options), body.webhook_url))
     session.add(job)
     session.flush()   # populate job.id without committing yet
 

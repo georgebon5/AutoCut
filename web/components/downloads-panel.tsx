@@ -25,14 +25,14 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   // (EDL JSON, standalone SRT/ASS, FCPXML) are still produced server-side —
   // they're useful for NLE workflows and debugging — but hidden from this UI.
   const outputs = outputsQ.data?.outputs ?? [];
-  const videos = outputs.filter((o) => o.kind === “video”);
-  const thumbnails = outputs.filter((o) => o.kind === “thumbnail”);
-  const chapterFiles = outputs.filter((o) => o.kind === “chapters_txt”);
-  const fcpxmlFiles = outputs.filter((o) => o.kind === “fcpxml”);
+  const videos = outputs.filter((o) => o.kind === "video");
+  const thumbnails = outputs.filter((o) => o.kind === "thumbnail");
+  const chapterFiles = outputs.filter((o) => o.kind === "chapters_txt");
+  const fcpxmlFiles = outputs.filter((o) => o.kind === "fcpxml");
 
   return (
-    <section className=”flex flex-col gap-3”>
-      <h2 className=”text-xs font-medium uppercase tracking-[0.2em] text-white/40”>
+    <section className="flex flex-col gap-3">
+      <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
         Κατέβασμα βίντεο
       </h2>
 
@@ -40,15 +40,15 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
         <ThumbnailStrip jobId={jobId} thumbnails={thumbnails} cacheKey={cacheKey} />
       )}
 
-      <div className=”glass-card rounded-2xl p-4”>
+      <div className="glass-card rounded-2xl p-4">
         {outputsQ.isLoading ? (
-          <p className=”text-sm text-white/40”>Φόρτωση…</p>
+          <p className="text-sm text-white/40">Φόρτωση…</p>
         ) : videos.length === 0 ? (
-          <p className=”text-sm text-white/40”>
-            Δεν έχει βγει τίποτα ακόμα. Πάτα “Ξαναφτιάξε βίντεο” πιο πάνω.
+          <p className="text-sm text-white/40">
+            Δεν έχει βγει τίποτα ακόμα. Πάτα "Ξαναφτιάξε βίντεο" πιο πάνω.
           </p>
         ) : (
-          <ul className=”flex flex-col gap-1.5”>
+          <ul className="flex flex-col gap-1.5">
             {videos.map((o) => (
               <OutputRow
                 key={o.name}
@@ -61,7 +61,7 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
                 key={o.name}
                 file={o}
                 href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
-                label=”FCP XML”
+                label="FCP XML"
               />
             ))}
           </ul>

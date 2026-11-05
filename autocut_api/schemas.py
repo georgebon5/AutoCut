@@ -61,6 +61,9 @@ class JobCreateRequest(BaseModel):
     # "fade" = cross-dissolve, "fadeblack" = dip to black, "fadewhite" = dip
     # to white.
     transition: str | None = None
+    # Webhook: HTTP POST to this URL when the job reaches "done" or "failed".
+    # Payload: {job_id, status, error, timestamp}.  Optional.
+    webhook_url: str | None = None
 
 
 class CreateUploadRequest(BaseModel):
