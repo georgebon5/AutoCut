@@ -106,6 +106,10 @@ class PipelineOptions:
     # this value (applied after padding). 0 = disabled. 400–600 ms removes
     # audible micro-cut stutters while leaving intentional pauses intact.
     merge_gap_ms: int = 0
+    # Drop kept segments shorter than this duration (ms) from the final cut.
+    # 0 = disabled. 500–800 ms prevents sub-second "blip" segments that score
+    # highly but create jarring micro-cuts in the rendered output.
+    min_segment_ms: int = 0
 
 
 @dataclass
@@ -523,18 +527,29 @@ def run_pipeline(
                 caption_paths.append(path)
                 rep.info(f"wrote {path.name}")
 
-    padding_s  = options.padding_ms   / 1000.0
-    merge_gap_s = options.merge_gap_ms / 1000.0
+    padding_s     = options.padding_ms     / 1000.0
+    merge_gap_s   = options.merge_gap_ms   / 1000.0
+    min_segment_s = options.min_segment_ms / 1000.0
+
+    def _drop_short_keeps(segs: list[Segment]) -> list[Segment]:
+        if min_segment_s <= 0:
+            return segs
+        for s in segs:
+            if s.decision == "keep" and s.duration < min_segment_s:
+                s.decision = "cut"
+        return segs
 
     if not presets_to_render:
         segs = apply_padding(all_segments, proxies, padding_s)
         segs = merge_close_segments(segs, merge_gap_s)
+        segs = _drop_short_keeps(segs)
         _render_pass(segs, "rough_cut")
     else:
         for p in presets_to_render:
             segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
             segs = apply_padding(segs, proxies, padding_s)
             segs = merge_close_segments(segs, merge_gap_s)
+            segs = _drop_short_keeps(segs)
             kept = sum(s.duration for s in segs if s.decision == "keep")
             target = cfg.presets.targets[p]
             rep.info(f"preset={p}: target {target:.0f}s, selected {kept:.0f}s")
@@ -710,6 +725,11 @@ def _run_voiceover_pipeline(
         word_timestamps=word_ts or None,
     )
     segments = punch_out_fillers(segments, filler_cuts + take_cuts)
+    if options.min_segment_ms > 0:
+        min_vo_s = options.min_segment_ms / 1000.0
+        for s in segments:
+            if s.decision == "keep" and s.duration < min_vo_s:
+                s.decision = "cut"
     kept_dur = sum(s.duration for s in segments if s.decision == "keep")
     rep.info(f"kept {kept_dur:.1f}s of voiceover across {len(segments)} segment(s)")
 

@@ -244,7 +244,7 @@ def test_defaults_persisted_when_no_options_in_request(default_client):
         "preset": "none", "hook": False, "pacing": False, "zoom": False,
         "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
         "semantic_match": False, "transition_type": "none", "color_grading": "none",
-        "padding_ms": 0, "merge_gap_ms": 0,
+        "padding_ms": 0, "merge_gap_ms": 0, "min_segment_ms": 0,
     }
 
 
@@ -259,7 +259,7 @@ def test_options_persisted_to_config(default_client):
         "preset": "medium", "hook": True, "pacing": True, "zoom": True,
         "audio_enhance": False, "audio_denoise": False, "output_aspect": "source",
         "semantic_match": False, "transition_type": "none", "color_grading": "none",
-        "padding_ms": 0, "merge_gap_ms": 0,
+        "padding_ms": 0, "merge_gap_ms": 0, "min_segment_ms": 0,
     }
 
 

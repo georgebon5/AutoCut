@@ -57,6 +57,7 @@ export default function UploadForm() {
   const [colorGrading, setColorGrading] = useState<"none" | "warm" | "cool" | "cinematic" | "vibrant">("none");
   const [paddingMs, setPaddingMs] = useState(150);
   const [mergeGapMs, setMergeGapMs] = useState(0);
+  const [minSegmentMs, setMinSegmentMs] = useState(0);
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -179,6 +180,7 @@ export default function UploadForm() {
         color_grading: colorGrading !== "none" ? colorGrading : undefined,
         padding_ms: paddingMs > 0 ? paddingMs : undefined,
         merge_gap_ms: mergeGapMs > 0 ? mergeGapMs : undefined,
+        min_segment_ms: minSegmentMs > 0 ? minSegmentMs : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -462,6 +464,33 @@ export default function UploadForm() {
             <span>0 — απενεργοποιημένο</span>
             <span>500 ms — προτεινόμενο</span>
             <span>800 ms</span>
+          </div>
+        </div>
+
+        {/* Min segment duration */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-white/50">
+              Ελάχιστη διάρκεια segment{" "}
+              <span className="text-white/30">(κόβει αυτόματα blip-segments κάτω από αυτό)</span>
+            </p>
+            <span className="font-mono text-xs text-white/60">
+              {minSegmentMs === 0 ? "off" : `${minSegmentMs} ms`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={2000}
+            step={100}
+            value={minSegmentMs}
+            onChange={(e) => setMinSegmentMs(Number(e.target.value))}
+            className="w-full accent-fuchsia-400"
+          />
+          <div className="flex justify-between text-[10px] text-white/25">
+            <span>0 — απενεργοποιημένο</span>
+            <span>500 ms — προτεινόμενο</span>
+            <span>2000 ms</span>
           </div>
         </div>
 

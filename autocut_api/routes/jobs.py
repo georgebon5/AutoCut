@@ -42,6 +42,7 @@ _API_OPTION_KEYS = (
     "color_grading",
     "padding_ms",
     "merge_gap_ms",
+    "min_segment_ms",
     # music_path is a Path, handled specially in _options_to_json like voiceover_audio_path.
 )
 
@@ -60,6 +61,7 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         color_grading=body.color_grading or "none",
         padding_ms=body.padding_ms,
         merge_gap_ms=body.merge_gap_ms,
+        min_segment_ms=body.min_segment_ms,
     )
 
 

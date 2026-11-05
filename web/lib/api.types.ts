@@ -67,6 +67,8 @@ export interface JobCreateRequest {
   padding_ms?: number;
   /** Close inter-segment gaps shorter than this (ms). 0 = disabled. */
   merge_gap_ms?: number;
+  /** Drop kept segments shorter than this (ms) from the final cut. 0 = disabled. */
+  min_segment_ms?: number;
 }
 
 export interface Upload {

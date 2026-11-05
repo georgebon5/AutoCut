@@ -79,6 +79,9 @@ class JobCreateRequest(BaseModel):
     # Close inter-segment gaps shorter than this (ms). 0 = disabled.
     # 400–600 ms is a good range for removing micro-cut stutters.
     merge_gap_ms: int = 0
+    # Drop kept segments shorter than this (ms) from the final cut.
+    # 0 = disabled. 500–800 ms prevents jarring sub-second blip segments.
+    min_segment_ms: int = 0
 
 
 class CreateUploadRequest(BaseModel):
