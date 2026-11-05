@@ -39,7 +39,13 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const [filter, setFilter] = useState<Filter>("all");
   const [showHelp, setShowHelp] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [autoFollow, setAutoFollow] = useState(true);
   const pxPerSec = BASE_PX_PER_SECOND * zoom;
+
+  // Auto-scroll: refs for the scrollable container and a flag to suppress
+  // the scroll event that our own programmatic scroll fires.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const programScrollRef = useRef(false);
 
   // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
   // replay it. Using a ref avoids stale-closure issues in event handlers;
@@ -129,6 +135,31 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     [outputStartBySegment, edl.segments],
   );
 
+  // When the user manually moves the scroll position we pause auto-follow.
+  // A flag prevents our own programmatic scroll from triggering the pause.
+  const handleScrollContainer = useCallback(() => {
+    if (programScrollRef.current) {
+      programScrollRef.current = false;
+      return;
+    }
+    setAutoFollow(false);
+  }, []);
+
+  // Keep the playback cursor inside the visible scroll window.
+  // Label column offset: px-3 (12) + w-24 (96) + gap-3 (12) = 120 px.
+  const LABEL_OFFSET_PX = 120;
+  useEffect(() => {
+    if (!activeCursor || !scrollRef.current || !autoFollow) return;
+    const el = scrollRef.current;
+    const cursorAbsX = LABEL_OFFSET_PX + activeCursor.sourceX;
+    const { scrollLeft, clientWidth } = el;
+    const margin = Math.max(60, clientWidth * 0.2);
+    if (cursorAbsX < scrollLeft + margin || cursorAbsX > scrollLeft + clientWidth - margin) {
+      programScrollRef.current = true;
+      el.scrollLeft = Math.max(0, cursorAbsX - clientWidth / 2);
+    }
+  }, [activeCursor, autoFollow]);
+
   const selectAndSeek = (index: number) => {
     setSelected(index);
     const t = outputStartBySegment.get(index);
@@ -206,6 +237,9 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         pushUndo(selected, seg.decision as Decision);
         toggleMut.mutate({ index: selected, decision: next });
         onDirty?.();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        setAutoFollow((v) => !v);
       } else if (e.key === "?" || e.key === "h" || e.key === "H") {
         e.preventDefault();
         setShowHelp((v) => !v);
@@ -236,6 +270,9 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
           <FilterToggle value={filter} stats={stats} onChange={setFilter} />
         </div>
         <div className="flex items-center gap-2">
+          {activeCursor !== null ? (
+            <FollowButton active={autoFollow} onClick={() => setAutoFollow((v) => !v)} />
+          ) : null}
           <ZoomControl zoom={zoom} onChange={setZoom} />
           <BulkActions
             segments={edl.segments}
@@ -247,7 +284,11 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         </div>
       </div>
 
-      <div className="glass-card overflow-x-auto rounded-2xl">
+      <div
+        ref={scrollRef}
+        className="glass-card overflow-x-auto rounded-2xl"
+        onScroll={handleScrollContainer}
+      >
         <div className="flex min-w-full flex-col divide-y divide-white/5">
           {edl.hook ? (
             <HookRow
@@ -900,6 +941,33 @@ function StatsBar({
 
 
 // ---------------------------------------------------------------------------
+// Auto-follow toggle button — visible while video is playing
+// ---------------------------------------------------------------------------
+
+function FollowButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={
+        active
+          ? "Auto-scroll ενεργό — κλικ για παύση"
+          : "Auto-scroll σε παύση — κλικ για ενεργοποίηση"
+      }
+      className={[
+        "rounded border px-1.5 py-0.5 font-mono text-xs transition",
+        active
+          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300/80 hover:border-cyan-400/60"
+          : "border-white/10 bg-white/5 text-white/30 hover:border-white/20 hover:text-white/60",
+      ].join(" ")}
+    >
+      ⟳
+    </button>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // Timeline zoom control
 // ---------------------------------------------------------------------------
 
@@ -947,6 +1015,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["←", "→"],       desc: "Seek ±5s (στο player)" },
   { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
   { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
+  { keys: ["F"],             desc: "Toggle auto-scroll (follow cursor)" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },
   { keys: ["Esc"],           desc: "Κλείσιμο" },
 ];
