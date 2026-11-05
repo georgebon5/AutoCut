@@ -19,6 +19,8 @@ interface Props {
   jobId: string;
   preset: string | undefined;
   edl: Edl;
+  /** Current output-video playback position in seconds (from the preview player). */
+  currentTime?: number;
   /** Called after a successful toggle so the parent can flag "needs re-render". */
   onDirty?: () => void;
   /** Called with the output-timeline position when a segment is selected,
@@ -28,7 +30,7 @@ interface Props {
 
 type Filter = "all" | "keep" | "cut";
 
-export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }: Props) {
+export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [showHelp, setShowHelp] = useState(false);
@@ -84,6 +86,26 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
+
+  // Map output-video currentTime to a source position within one clip, so we
+  // can draw a playback cursor on the matching ClipRow / HookRow.
+  const activeCursor = useMemo((): { clipId: string; sourceX: number; isHook: boolean } | null => {
+    if (currentTime === undefined || currentTime < 0) return null;
+    for (const chunk of edl.render_chunks) {
+      if (currentTime < chunk.output_start || currentTime >= chunk.output_end) continue;
+      if (chunk.segment_index === -1) {
+        // Hook chunk
+        if (!edl.hook) continue;
+        const src = edl.hook.start + (currentTime - chunk.output_start);
+        return { clipId: edl.hook.clip_id, sourceX: src * PX_PER_SECOND, isHook: true };
+      }
+      const seg = edl.segments[chunk.segment_index];
+      if (!seg) continue;
+      const src = seg.start + (currentTime - chunk.output_start);
+      return { clipId: seg.clip_id, sourceX: src * PX_PER_SECOND, isHook: false };
+    }
+    return null;
+  }, [currentTime, edl.render_chunks, edl.segments, edl.hook]);
 
   const selectAndSeek = (index: number) => {
     setSelected(index);
@@ -199,6 +221,11 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
                 edl.render_chunks.find((c) => c.segment_index === -1)?.output_start ?? 0
               }
               jobId={jobId}
+              cursorX={
+                activeCursor?.isHook && activeCursor.clipId === edl.hook.clip_id
+                  ? activeCursor.sourceX
+                  : null
+              }
               onSeekRequest={onSeekRequest}
             />
           ) : null}
@@ -216,6 +243,11 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
               clip={clip}
               items={visibleItems}
               selectedIndex={selected}
+              cursorX={
+                activeCursor && !activeCursor.isHook && activeCursor.clipId === clip.clip_id
+                  ? activeCursor.sourceX
+                  : null
+              }
               onSelect={selectAndSeek}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
@@ -267,12 +299,14 @@ function HookRow({
   clip,
   outputTime,
   jobId,
+  cursorX,
   onSeekRequest,
 }: {
   hook: SegmentDict;
   clip: Clip | null;
   outputTime: number;
   jobId: string;
+  cursorX: number | null;
   onSeekRequest?: (t: number) => void;
 }) {
   const dur = hook.end - hook.start;
@@ -319,6 +353,13 @@ function HookRow({
             </span>
           )}
         </button>
+        {cursorX !== null ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-0 z-20 w-px bg-amber-300/90"
+            style={{ left: Math.round(cursorX), height: ROW_HEIGHT_PX }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -330,6 +371,7 @@ function ClipRow({
   clip,
   items,
   selectedIndex,
+  cursorX,
   onSelect,
   onToggle,
 }: {
@@ -337,6 +379,7 @@ function ClipRow({
   clip: Clip;
   items: { seg: SegmentDict; index: number }[];
   selectedIndex: number | null;
+  cursorX: number | null;
   onSelect: (index: number) => void;
   onToggle: (index: number, next: Decision) => void;
 }) {
@@ -426,6 +469,14 @@ function ClipRow({
             </button>
           );
         })}
+        {/* Playback cursor — thin vertical line tracking currentTime in source space */}
+        {cursorX !== null ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-0 z-20 w-px bg-cyan-300/90"
+            style={{ left: Math.round(cursorX), height: ROW_HEIGHT_PX }}
+          />
+        ) : null}
       </div>
     </div>
   );

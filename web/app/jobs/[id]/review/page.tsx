@@ -317,6 +317,7 @@ export default function ReviewPage() {
             jobId={jobId}
             preset={edlPreset ?? undefined}
             edl={edlQuery.data}
+            currentTime={currentTime}
             onDirty={() => setDirty(true)}
             onSeekRequest={(t) => {
               seekSeq.current += 1;
