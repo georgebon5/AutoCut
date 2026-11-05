@@ -64,6 +64,9 @@ class JobCreateRequest(BaseModel):
     # Webhook: HTTP POST to this URL when the job reaches "done" or "failed".
     # Payload: {job_id, status, error, timestamp}.  Optional.
     webhook_url: str | None = None
+    # Color grading preset applied at render time.  "none" = untouched.
+    # Allowed: "none", "warm", "cool", "cinematic", "vibrant".
+    color_grading: str | None = None
 
 
 class CreateUploadRequest(BaseModel):

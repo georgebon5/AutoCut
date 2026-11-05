@@ -54,6 +54,7 @@ export default function UploadForm() {
   const [semanticMatch, setSemanticMatch] = useState(false);
   const [transition, setTransition] = useState<"none" | "fade" | "fadeblack" | "fadewhite">("none");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [colorGrading, setColorGrading] = useState<"none" | "warm" | "cool" | "cinematic" | "vibrant">("none");
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -173,6 +174,7 @@ export default function UploadForm() {
           music?.state === "complete" && music.uploadId ? music.uploadId : undefined,
         transition: transition !== "none" ? transition : undefined,
         webhook_url: webhookUrl.trim() || undefined,
+        color_grading: colorGrading !== "none" ? colorGrading : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -383,6 +385,25 @@ export default function UploadForm() {
             <option value="fade">Cross-dissolve (fade)</option>
             <option value="fadeblack">Dip to black</option>
             <option value="fadewhite">Dip to white</option>
+          </select>
+        </div>
+
+        {/* Color grading */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <p className="text-xs text-white/50">
+            Color grading{" "}
+            <span className="text-white/30">(φίλτρο χρώματος στο τελικό βίντεο)</span>
+          </p>
+          <select
+            value={colorGrading}
+            onChange={(e) => setColorGrading(e.target.value as typeof colorGrading)}
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
+          >
+            <option value="none">Καθόλου (χωρίς φίλτρο)</option>
+            <option value="warm">Warm — ζεστό / πορτοκαλί</option>
+            <option value="cool">Cool — κρύο / μπλε</option>
+            <option value="cinematic">Cinematic — υψηλή αντίθεση, desaturated</option>
+            <option value="vibrant">Vibrant — έντονα χρώματα</option>
           </select>
         </div>
 

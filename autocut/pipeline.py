@@ -93,6 +93,9 @@ class PipelineOptions:
     # "fade" = cross-dissolve, "fadeblack" = dip to black, "fadewhite" = dip
     # to white.  Duration is taken from cfg.transition.duration_ms.
     transition_type: str = "none"
+    # Color grading preset applied at render time.  "none" = no grading.
+    # Other values: "warm", "cool", "cinematic", "vibrant".
+    color_grading: str = "none"
 
 
 @dataclass
@@ -448,6 +451,7 @@ def run_pipeline(
                     type=options.transition_type,
                     duration_ms=cfg.transition.duration_ms,
                 ) if options.transition_type not in ("none", "") else None,
+                color_grading=options.color_grading,
             )
         except RenderError as e:
             raise PipelineError(f"render failed: {e}") from e
@@ -760,6 +764,7 @@ def _run_voiceover_pipeline(
             clip_schedule=clip_schedule,
             music_path=options.music_path,
             music_cfg=cfg.music,
+            color_grading=options.color_grading,
         )
     except RenderError as e:
         raise PipelineError(f"render failed: {e}") from e

@@ -28,6 +28,8 @@ export interface JobConfig {
   music_path?: string;
   // Visual transition between cuts.
   transition_type?: TransitionType;
+  // Color grading preset applied at render time.
+  color_grading?: ColorGrading;
 }
 
 export interface Job {
@@ -43,6 +45,7 @@ export interface Job {
 }
 
 export type TransitionType = "none" | "fade" | "fadeblack" | "fadewhite";
+export type ColorGrading = "none" | "warm" | "cool" | "cinematic" | "vibrant";
 
 export interface JobCreateRequest {
   upload_ids: string[];
@@ -58,6 +61,7 @@ export interface JobCreateRequest {
   music_upload_id?: string;
   transition?: TransitionType;
   webhook_url?: string;
+  color_grading?: ColorGrading;
 }
 
 export interface Upload {

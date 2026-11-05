@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from autocut.color import COLOR_PRESETS
 from autocut.config import MusicConfig, RenderConfig, TransitionConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
 
@@ -239,6 +240,7 @@ def _build_render_cmd(
     music_path: Path | None = None,
     music_cfg: MusicConfig | None = None,
     transition_cfg: TransitionConfig | None = None,
+    color_grading: str = "none",
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -399,6 +401,12 @@ def _build_render_cmd(
     # Aspect-ratio crop is applied per-segment above (so each clip's face
     # position is respected). Nothing left to do here.
 
+    # Color grading: eq filter inserted after concat, before scale + subs.
+    eq_str = COLOR_PRESETS.get(color_grading)
+    if eq_str:
+        filters.append(f"{video_pre_subs}{eq_str}[vgraded]")
+        video_pre_subs = "[vgraded]"
+
     # In fast_preview mode, cap the long edge at 720px before anything else
     # downstream. On 1080p/4K phone footage this ~4-9x fewer pixels for the
     # encoder to chew through, dominating the end-to-end render time. We
@@ -520,6 +528,7 @@ def render_voiceover_vlog(
     clip_schedule: list[str] | None = None,
     music_path: Path | None = None,
     music_cfg: MusicConfig | None = None,
+    color_grading: str = "none",
 ) -> Path:
     """Render a voiceover-driven vlog.
 
@@ -654,6 +663,12 @@ def render_voiceover_vlog(
 
     # Aspect crop handled per-input above; nothing to do here.
 
+    # Color grading: eq filter after concat, before scale + subs.
+    eq_str = COLOR_PRESETS.get(color_grading)
+    if eq_str:
+        filters.append(f"{video_pre}{eq_str}[vgraded]")
+        video_pre = "[vgraded]"
+
     # Scale for preview, optional subs overlay (same policy as the main
     # render path keeps libass drawing onto final-size frames).
     if fast_preview:
@@ -763,6 +778,7 @@ def render(
     music_path: Path | None = None,
     music_cfg: MusicConfig | None = None,
     transition_cfg: TransitionConfig | None = None,
+    color_grading: str = "none",
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -865,6 +881,7 @@ def render(
         music_path=music_path,
         music_cfg=music_cfg,
         transition_cfg=transition_cfg,
+        color_grading=color_grading,
     )
     _run(cmd, cwd=cwd)
     return output_path

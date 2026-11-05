@@ -223,6 +223,7 @@ def rerender_from_edl(
             if mp.exists():
                 music_path_rerender = mp
         transition_type_rerender = str(opts.get("transition_type", "none"))
+        color_grading_rerender = str(opts.get("color_grading", "none"))
         from autocut.config import TransitionConfig as _TC
         render(
             proxies=edl.clips,
@@ -243,6 +244,7 @@ def rerender_from_edl(
                 type=transition_type_rerender,
                 duration_ms=cfg.transition.duration_ms,
             ) if transition_type_rerender not in ("none", "") else None,
+            color_grading=color_grading_rerender,
         )
         # Persist the recomputed chunk map so the next EDL fetch carries it.
         save_edl(edl, edl_path)
