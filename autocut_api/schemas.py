@@ -208,6 +208,17 @@ class CaptionStyle(BaseModel):
     position: str | None = None         # "top" | "middle" | "bottom"
 
 
+class SplitRequest(BaseModel):
+    """POST body for splitting a segment into two halves at a source timestamp."""
+    at: float   # seconds within the clip
+
+
+class SplitResponse(BaseModel):
+    """Both halves produced by the split, in EDL index order."""
+    first: SegmentResponse
+    second: SegmentResponse
+
+
 class RenderRequest(BaseModel):
     """Optional POST body carrying style overrides for a re-render.
 

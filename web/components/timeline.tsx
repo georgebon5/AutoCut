@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, getWaveform } from "@/lib/api";
 import { useBatchToggle } from "@/lib/use-batch-toggle";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
+import { useSplitSegment } from "@/lib/use-split-segment";
 import { useTrimSegment } from "@/lib/use-trim-segment";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
@@ -96,6 +97,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const toggleMut = useSegmentToggle(jobId, preset);
   const batchMut = useBatchToggle(jobId, preset);
   const trimMut = useTrimSegment(jobId, preset);
+  const splitMut = useSplitSegment(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
@@ -237,6 +239,15 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         pushUndo(selected, seg.decision as Decision);
         toggleMut.mutate({ index: selected, decision: next });
         onDirty?.();
+      } else if (e.key === "s" || e.key === "S") {
+        // Split selected segment at current playback position.
+        if (selected === null || !activeCursor) return;
+        const seg = edl.segments[selected];
+        if (!seg || activeCursor.isHook) return;
+        if (seg.clip_id !== activeCursor.clipId) return;
+        e.preventDefault();
+        const sourceTime = activeCursor.sourceX / pxPerSec;
+        splitMut.mutate({ index: selected, at: sourceTime });
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         setAutoFollow((v) => !v);
@@ -249,7 +260,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, toggleMut, onDirty, handleUndo, pushUndo]);
+  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, onDirty, handleUndo, pushUndo]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -336,6 +347,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                 trimMut.mutate({ index, start, end });
                 onDirty?.();
               }}
+              onSplit={(index, at) => splitMut.mutate({ index, at })}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
                 if (seg) pushUndo(index, seg.decision as Decision);
@@ -476,6 +488,7 @@ function ClipRow({
   onSelect,
   onWaveformClick,
   onTrim,
+  onSplit,
   onToggle,
 }: {
   jobId: string;
@@ -487,6 +500,7 @@ function ClipRow({
   onSelect: (index: number) => void;
   onWaveformClick: (sourceTime: number) => void;
   onTrim: (index: number, start: number | undefined, end: number | undefined) => void;
+  onSplit: (index: number, at: number) => void;
   onToggle: (index: number, next: Decision) => void;
 }) {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
@@ -574,7 +588,15 @@ function ClipRow({
             <button
               key={index}
               type="button"
-              onClick={() => onSelect(index)}
+              onClick={(e) => {
+                if (e.altKey) {
+                  // Alt+Click: split at the clicked source time.
+                  const sourceTime = dispStart + e.nativeEvent.offsetX / pxPerSec;
+                  onSplit(index, sourceTime);
+                } else {
+                  onSelect(index);
+                }
+              }}
               onDoubleClick={() => onToggle(index, next)}
               style={{
                 left,
@@ -583,7 +605,7 @@ function ClipRow({
                 // Active selection always shows at full opacity regardless of score.
                 opacity: active ? 1 : scoreOpacity,
               }}
-              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · score ${seg.interest_score.toFixed(2)} · ${seg.decision}`}
+              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · score ${seg.interest_score.toFixed(2)} · ${seg.decision} — Alt+Click to split`}
               className={[
                 "absolute top-0 rounded-md border transition duration-200",
                 keep
@@ -1014,6 +1036,8 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["Space"],         desc: "Play / Pause" },
   { keys: ["←", "→"],       desc: "Seek ±5s (στο player)" },
   { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
+  { keys: ["S"],             desc: "Διάσπαση segment στη θέση cursor" },
+  { keys: ["Alt+Click"],     desc: "Διάσπαση segment στο σημείο κλικ" },
   { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
   { keys: ["F"],             desc: "Toggle auto-scroll (follow cursor)" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },

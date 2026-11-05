@@ -17,6 +17,7 @@ import type {
   OverridesListResponse,
   SegmentResponse,
   SegmentUpdate,
+  SplitResponse,
   TrainResult,
   TrainStatus,
   Upload,
@@ -153,6 +154,20 @@ export const batchPatchSegments = (
       body: JSON.stringify({ updates }),
     },
   );
+};
+
+export const splitSegment = (
+  jobId: string,
+  index: number,
+  at: number,
+  preset?: string,
+) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return request<SplitResponse>(`/jobs/${jobId}/segments/${index}/split${q}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ at }),
+  });
 };
 
 export const patchWord = (

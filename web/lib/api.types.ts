@@ -239,6 +239,11 @@ export interface TrainResult {
   message: string;
 }
 
+export interface SplitResponse {
+  first: SegmentResponse;
+  second: SegmentResponse;
+}
+
 export interface WaveformData {
   peaks: number[];   // normalized 0..1 RMS values
   n_peaks: number;

@@ -322,6 +322,72 @@ def test_patch_preset_query_scoped_to_right_file(app_client):
 
 
 # ---------------------------------------------------------------------------
+# Split segment
+# ---------------------------------------------------------------------------
+
+def test_split_returns_two_halves(app_client):
+    app, client, tmp = app_client
+    # Segment 0: 0.0–1.0s — split at 0.4
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    r = client.post(f"/jobs/{jid}/segments/0/split", json={"at": 0.4})
+    assert r.status_code == 200
+    body = r.json()
+    assert abs(body["first"]["start"] - 0.0) < 1e-6
+    assert abs(body["first"]["end"] - 0.4) < 1e-6
+    assert abs(body["second"]["start"] - 0.4) < 1e-6
+    assert abs(body["second"]["end"] - 1.0) < 1e-6
+    assert body["first"]["index"] == 0
+    assert body["second"]["index"] == 1
+
+
+def test_split_inserts_at_correct_position(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    client.post(f"/jobs/{jid}/segments/1/split", json={"at": 1.6})
+    edl = client.get(f"/jobs/{jid}/edl").json()
+    assert len(edl["segments"]) == 4
+    # Original seg 1 (1.0–2.0) is now two segments at indices 1 and 2.
+    assert abs(edl["segments"][1]["start"] - 1.0) < 1e-6
+    assert abs(edl["segments"][1]["end"] - 1.6) < 1e-6
+    assert abs(edl["segments"][2]["start"] - 1.6) < 1e-6
+    assert abs(edl["segments"][2]["end"] - 2.0) < 1e-6
+    # Segment 3 is the original seg 2 (shifted).
+    assert abs(edl["segments"][3]["start"] - 2.0) < 1e-6
+
+
+def test_split_inherits_decision(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2, decision="cut"))
+    r = client.post(f"/jobs/{jid}/segments/0/split", json={"at": 0.5})
+    body = r.json()
+    assert body["first"]["decision"] == "cut"
+    assert body["second"]["decision"] == "cut"
+    assert any("split" in reason for reason in body["first"]["reasons"])
+
+
+def test_split_at_boundary_returns_400(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    # Split at start boundary — too close.
+    r = client.post(f"/jobs/{jid}/segments/0/split", json={"at": 0.0})
+    assert r.status_code == 400
+
+
+def test_split_too_close_to_end_returns_400(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.post(f"/jobs/{jid}/segments/0/split", json={"at": 0.99})
+    assert r.status_code == 400
+
+
+def test_split_out_of_range_returns_400(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.post(f"/jobs/{jid}/segments/9/split", json={"at": 0.5})
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # OpenAPI
 # ---------------------------------------------------------------------------
 
@@ -330,3 +396,4 @@ def test_openapi_includes_edl_routes(app_client):
     schema = client.get("/openapi.json").json()
     assert "/jobs/{job_id}/edl" in schema["paths"]
     assert "/jobs/{job_id}/segments/{index}" in schema["paths"]
+    assert "/jobs/{job_id}/segments/{index}/split" in schema["paths"]

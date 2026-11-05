@@ -17,12 +17,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from autocut.edl import edl_to_dict, load_edl, save_edl
+from autocut.models import Segment as _Segment
 from autocut_api.dependencies import get_db
 from autocut_api.models import Job, SegmentOverride
 from autocut_api.schemas import (
     BatchSegmentUpdate,
     SegmentResponse,
     SegmentUpdate,
+    SplitRequest,
+    SplitResponse,
     WordResponse,
     WordUpdate,
 )
@@ -200,6 +203,94 @@ def patch_segment(
         interest_score=seg.interest_score,
         reasons=seg.reasons,
         features=seg.features,
+    )
+
+
+@router.post("/{job_id}/segments/{index}/split", response_model=SplitResponse)
+def split_segment(
+    job_id: str,
+    index: int,
+    body: SplitRequest,
+    preset: str | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> SplitResponse:
+    """Split segment ``index`` into two halves at source timestamp ``body.at``.
+
+    Both halves inherit the original's decision, score, and features.
+    All subsequent indices shift up by 1 — the client must refetch the EDL.
+    """
+    job = get_done_job(session, job_id)
+    _, path = resolve_edl(job, preset)
+    edl = load_edl(path)
+
+    if index < 0 or index >= len(edl.segments):
+        raise HTTPException(
+            status_code=400,
+            detail=f"segment index {index} out of range [0, {len(edl.segments)})",
+        )
+
+    seg = edl.segments[index]
+    at = float(body.at)
+
+    if at <= seg.start + _MIN_SEGMENT_DURATION or at >= seg.end - _MIN_SEGMENT_DURATION:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"split point {at:.3f}s too close to boundary "
+                f"[{seg.start:.3f}, {seg.end:.3f}] (min gap {_MIN_SEGMENT_DURATION}s)"
+            ),
+        )
+
+    shared_reasons = list(seg.reasons) + ["split"]
+    first = _Segment(
+        clip_id=seg.clip_id,
+        start=seg.start,
+        end=at,
+        features=dict(seg.features),
+        interest_score=seg.interest_score,
+        decision=seg.decision,
+        decision_source=seg.decision_source,
+        reasons=shared_reasons,
+    )
+    second = _Segment(
+        clip_id=seg.clip_id,
+        start=at,
+        end=seg.end,
+        features=dict(seg.features),
+        interest_score=seg.interest_score,
+        decision=seg.decision,
+        decision_source=seg.decision_source,
+        reasons=shared_reasons,
+    )
+
+    edl.segments = edl.segments[:index] + [first, second] + edl.segments[index + 1:]
+    save_edl(edl, path)
+
+    return SplitResponse(
+        first=SegmentResponse(
+            index=index,
+            clip_id=first.clip_id,
+            start=first.start,
+            end=first.end,
+            duration=first.duration,
+            decision=first.decision,
+            decision_source=first.decision_source,
+            interest_score=first.interest_score,
+            reasons=first.reasons,
+            features=first.features,
+        ),
+        second=SegmentResponse(
+            index=index + 1,
+            clip_id=second.clip_id,
+            start=second.start,
+            end=second.end,
+            duration=second.duration,
+            decision=second.decision,
+            decision_source=second.decision_source,
+            interest_score=second.interest_score,
+            reasons=second.reasons,
+            features=second.features,
+        ),
     )
 
 
