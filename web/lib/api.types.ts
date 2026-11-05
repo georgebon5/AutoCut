@@ -178,7 +178,7 @@ export interface SegmentResponse {
 export interface OutputFile {
   name: string;
   size: number;
-  kind: "video" | "edl" | "captions_srt" | "captions_ass" | "thumbnail" | "chapters_txt" | "chapters_json" | "fcpxml" | "cmx_edl";
+  kind: "video" | "edl" | "captions_srt" | "captions_ass" | "thumbnail" | "chapters_txt" | "chapters_json" | "fcpxml" | "cmx_edl" | "waveform";
 }
 
 export interface OutputsListResponse {
@@ -224,6 +224,11 @@ export interface TrainResult {
   beats_baseline: boolean;
   deployed: boolean;
   message: string;
+}
+
+export interface WaveformData {
+  peaks: number[];   // normalized 0..1 RMS values
+  n_peaks: number;
 }
 
 export interface CaptionStyle {

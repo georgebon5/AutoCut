@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from autocut.captions import write_cut_captions
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
 from autocut.cmx_edl import save_cmx
+from autocut.waveform import save_waveform_json
 from autocut.config import AutoCutConfig, TransitionConfig
 from autocut.fcpxml import save_fcpxml
 from autocut.edl import EDL, save_edl
@@ -206,6 +207,14 @@ def run_pipeline(
         raise PipelineError(f"ingest failed: {e}") from e
     for p in proxies:
         rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}  {p.fps:.2f}fps")
+
+    # Waveform peaks for the timeline UI — fast, non-blocking, silent on failure.
+    for p in proxies:
+        if p.audio_path and p.audio_path.exists():
+            try:
+                save_waveform_json(p.audio_path, output_dir / f"waveform_{p.clip_id}.json")
+            except Exception:
+                pass
 
     # ── 2. Parallel analysis: VAD + Whisper + Scenes ─────────────────────────
     # These three stages all read the same proxy but are otherwise
@@ -623,6 +632,13 @@ def _run_voiceover_pipeline(
         raise PipelineError(f"ingest failed: {e}") from e
     for p in proxies:
         rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}")
+    for p in proxies:
+        if p.audio_path and p.audio_path.exists():
+            try:
+                save_waveform_json(p.audio_path, output_dir / f"waveform_{p.clip_id}.json")
+            except Exception:
+                pass
+
 
     try:
         vo_wav, vo_duration = normalize_voiceover(

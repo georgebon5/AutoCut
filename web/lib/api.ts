@@ -20,6 +20,7 @@ import type {
   TrainResult,
   TrainStatus,
   Upload,
+  WaveformData,
   WordResponse,
 } from "./api.types";
 
@@ -156,6 +157,12 @@ export const listOutputs = (jobId: string) =>
 /** URL for a download link / <video src>. The browser hits it directly. */
 export const outputDownloadUrl = (jobId: string, filename: string) =>
   `${BASE}/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
+
+/** Fetch pre-computed waveform peaks for one clip. */
+export const getWaveform = (jobId: string, clipId: string) =>
+  request<WaveformData>(
+    `/jobs/${jobId}/outputs/${encodeURIComponent(`waveform_${clipId}.json`)}`,
+  );
 
 /** Fetch a text output file as a plain string (used for chapters preview). */
 export const fetchOutputText = async (jobId: string, filename: string): Promise<string> => {

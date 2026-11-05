@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-import { ApiError } from "@/lib/api";
+import { ApiError, getWaveform } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
@@ -125,6 +126,7 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
           {edl.clips.map((clip) => (
             <ClipRow
               key={clip.clip_id}
+              jobId={jobId}
               clip={clip}
               items={bySegmentIndex.get(clip.clip_id) ?? []}
               selectedIndex={selected}
@@ -166,12 +168,14 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
 
 
 function ClipRow({
+  jobId,
   clip,
   items,
   selectedIndex,
   onSelect,
   onToggle,
 }: {
+  jobId: string;
   clip: Clip;
   items: { seg: SegmentDict; index: number }[];
   selectedIndex: number | null;
@@ -179,6 +183,13 @@ function ClipRow({
   onToggle: (index: number, next: Decision) => void;
 }) {
   const widthPx = Math.max(120, Math.round(clip.duration * PX_PER_SECOND));
+
+  const waveformQ = useQuery({
+    queryKey: ["waveform", jobId, clip.clip_id],
+    queryFn: () => getWaveform(jobId, clip.clip_id),
+    staleTime: Infinity,
+    retry: false,
+  });
 
   return (
     <div className="flex gap-3 px-3 py-3">
@@ -192,6 +203,13 @@ function ClipRow({
         className="relative"
         style={{ width: widthPx, height: ROW_HEIGHT_PX }}
       >
+        {waveformQ.data && (
+          <WaveformBackground
+            peaks={waveformQ.data.peaks}
+            widthPx={widthPx}
+            heightPx={ROW_HEIGHT_PX}
+          />
+        )}
         {items.map(({ seg, index }) => {
           const left = Math.round(seg.start * PX_PER_SECOND);
           const w = Math.max(
@@ -221,6 +239,45 @@ function ClipRow({
         })}
       </div>
     </div>
+  );
+}
+
+
+function WaveformBackground({
+  peaks,
+  widthPx,
+  heightPx,
+}: {
+  peaks: number[];
+  widthPx: number;
+  heightPx: number;
+}) {
+  const n = peaks.length;
+  if (n === 0) return null;
+  const barW = widthPx / n;
+  const mid = heightPx / 2;
+  return (
+    <svg
+      width={widthPx}
+      height={heightPx}
+      className="absolute inset-0 pointer-events-none"
+      style={{ opacity: 0.15 }}
+      aria-hidden
+    >
+      {peaks.map((p, i) => {
+        const h = Math.max(1, p * heightPx);
+        return (
+          <rect
+            key={i}
+            x={i * barW}
+            y={mid - h / 2}
+            width={Math.max(1, barW - 0.5)}
+            height={h}
+            fill="white"
+          />
+        );
+      })}
+    </svg>
   );
 }
 
