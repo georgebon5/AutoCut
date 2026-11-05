@@ -62,6 +62,8 @@ export interface JobCreateRequest {
   transition?: TransitionType;
   webhook_url?: string;
   color_grading?: ColorGrading;
+  /** Milliseconds of audio context to keep on each side of a cut (0 = hard boundary). */
+  padding_ms?: number;
 }
 
 export interface Upload {

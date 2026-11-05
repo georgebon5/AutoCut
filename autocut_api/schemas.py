@@ -67,6 +67,9 @@ class JobCreateRequest(BaseModel):
     # Color grading preset applied at render time.  "none" = untouched.
     # Allowed: "none", "warm", "cool", "cinematic", "vibrant".
     color_grading: str | None = None
+    # Milliseconds of audio context to preserve on each side of a cut.
+    # 0 = hard boundary; 150 is a good default to avoid clipping syllables.
+    padding_ms: int = 0
 
 
 class CreateUploadRequest(BaseModel):

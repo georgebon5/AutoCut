@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
+from autocut.padding import apply_padding
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
 from autocut.cmx_edl import save_cmx
 from autocut.waveform import save_waveform_json
@@ -96,6 +97,10 @@ class PipelineOptions:
     # Color grading preset applied at render time.  "none" = no grading.
     # Other values: "warm", "cool", "cinematic", "vibrant".
     color_grading: str = "none"
+    # Milliseconds of audio context to keep on each side of a kept segment.
+    # 0 = hard boundary at the exact VAD/silence edge; 150 ms is a good
+    # default to avoid clipping the first/last syllable.
+    padding_ms: int = 0
 
 
 @dataclass
@@ -513,11 +518,15 @@ def run_pipeline(
                 caption_paths.append(path)
                 rep.info(f"wrote {path.name}")
 
+    padding_s = options.padding_ms / 1000.0
+
     if not presets_to_render:
-        _render_pass(all_segments, "rough_cut")
+        segs = apply_padding(all_segments, proxies, padding_s)
+        _render_pass(segs, "rough_cut")
     else:
         for p in presets_to_render:
             segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
+            segs = apply_padding(segs, proxies, padding_s)
             kept = sum(s.duration for s in segs if s.decision == "keep")
             target = cfg.presets.targets[p]
             rep.info(f"preset={p}: target {target:.0f}s, selected {kept:.0f}s")

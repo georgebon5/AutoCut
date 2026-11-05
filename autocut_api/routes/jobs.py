@@ -38,6 +38,7 @@ _API_OPTION_KEYS = (
     "semantic_match",
     "transition_type",
     "color_grading",
+    "padding_ms",
     # music_path is a Path, handled specially in _options_to_json like voiceover_audio_path.
 )
 
@@ -54,6 +55,7 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         semantic_match=body.semantic_match,
         transition_type=body.transition or "none",
         color_grading=body.color_grading or "none",
+        padding_ms=body.padding_ms,
     )
 
 
