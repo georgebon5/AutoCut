@@ -165,6 +165,17 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
 
       <div className="glass-card overflow-x-auto rounded-2xl">
         <div className="flex min-w-full flex-col divide-y divide-white/5">
+          {edl.hook ? (
+            <HookRow
+              hook={edl.hook}
+              clip={edl.clips.find((c) => c.clip_id === edl.hook!.clip_id) ?? null}
+              outputTime={
+                edl.render_chunks.find((c) => c.segment_index === -1)?.output_start ?? 0
+              }
+              jobId={jobId}
+              onSeekRequest={onSeekRequest}
+            />
+          ) : null}
           {edl.clips.map((clip) => (
             <ClipRow
               key={clip.clip_id}
@@ -208,6 +219,69 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> play/pause
       </p>
     </section>
+  );
+}
+
+
+function HookRow({
+  hook,
+  clip,
+  outputTime,
+  jobId,
+  onSeekRequest,
+}: {
+  hook: SegmentDict;
+  clip: Clip | null;
+  outputTime: number;
+  jobId: string;
+  onSeekRequest?: (t: number) => void;
+}) {
+  const dur = hook.end - hook.start;
+  const widthPx = Math.max(80, Math.round(dur * PX_PER_SECOND));
+
+  const waveformQ = useQuery({
+    queryKey: ["waveform", jobId, hook.clip_id],
+    queryFn: () => getWaveform(jobId, hook.clip_id),
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  return (
+    <div className="flex gap-3 bg-amber-400/5 px-3 py-3">
+      <div className="w-24 shrink-0 text-xs">
+        <div className="font-semibold text-amber-300/90">⚡ Hook</div>
+        <div className="mt-0.5 font-mono text-white/35" title={hook.clip_id}>
+          {hook.clip_id}
+        </div>
+      </div>
+      <div className="relative" style={{ width: widthPx, height: ROW_HEIGHT_PX }}>
+        {waveformQ.data && (
+          <WaveformBackground
+            peaks={waveformQ.data.peaks}
+            widthPx={widthPx}
+            heightPx={ROW_HEIGHT_PX}
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => onSeekRequest?.(outputTime)}
+          style={{ width: widthPx, height: ROW_HEIGHT_PX }}
+          title={`Hook · ${hook.start.toFixed(2)}–${hook.end.toFixed(2)}s · score ${hook.interest_score.toFixed(2)}`}
+          className="absolute top-0 left-0 rounded-md border border-amber-400/50 bg-amber-400/20 hover:bg-amber-400/35 transition duration-200"
+        >
+          {widthPx >= 60 && (
+            <span className="pointer-events-none absolute top-1 left-1 font-mono text-[9px] text-amber-200/60 leading-none">
+              {dur.toFixed(1)}s
+            </span>
+          )}
+          {widthPx >= 38 && (
+            <span className="pointer-events-none absolute bottom-1 right-1 font-mono text-[9px] text-amber-200/60 leading-none">
+              {hook.interest_score.toFixed(2)}
+            </span>
+          )}
+        </button>
+      </div>
+    </div>
   );
 }
 

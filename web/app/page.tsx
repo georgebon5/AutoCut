@@ -94,6 +94,7 @@ function JobRow({ job }: { job: Job }) {
 
   const pct = Math.round(job.progress * 100);
   const canDelete = job.status === "done" || job.status === "failed";
+  const timeAgo = fmtRelTime(job.created_at);
 
   const inner = (
     <div className="glass-card rounded-2xl p-5 transition hover:border-white/15 hover:bg-white/[0.05]">
@@ -133,6 +134,7 @@ function JobRow({ job }: { job: Job }) {
           <p className="mt-0.5 font-mono text-xs text-white/35" title={job.id}>
             {job.id.slice(0, 8)}<span className="text-white/20">…</span>
             <span className="ml-2 not-italic text-white/30">{job.stage}</span>
+            <span className="ml-2 not-italic text-white/25">{timeAgo}</span>
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -257,6 +259,21 @@ function StatusChip({ status }: { status: Job["status"] }) {
     </span>
   );
 }
+
+function fmtRelTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diffMs / 1000);
+  if (s < 60) return "μόλις τώρα";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}λ πριν`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}ω πριν`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return "χθες";
+  if (d < 7) return `${d}μ πριν`;
+  return new Date(iso).toLocaleDateString("el-GR", { day: "numeric", month: "short" });
+}
+
 
 // ---------------------------------------------------------------------------
 // Intelligence panel — shows adaptive model status + manual retrain trigger
