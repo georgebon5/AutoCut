@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, getWaveform } from "@/lib/api";
 import { useBatchToggle } from "@/lib/use-batch-toggle";
 import { useMergeSegment } from "@/lib/use-merge-segment";
+import { useNoteSegment } from "@/lib/use-note-segment";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import { useSplitSegment } from "@/lib/use-split-segment";
 import { useTrimSegment } from "@/lib/use-trim-segment";
@@ -387,7 +388,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       ) : null}
 
       {selectedSeg ? (
-        <SegmentDetail index={selected!} seg={selectedSeg} />
+        <SegmentDetail index={selected!} seg={selectedSeg} jobId={jobId} preset={preset} />
       ) : (
         <p className="text-xs text-white/40">
           Πάτα ένα κομμάτι για να το κρατήσεις ή να το κόψεις.
@@ -790,8 +791,17 @@ const FEATURE_LABELS: Record<string, string> = {
   filler_density:   "Fillers",
 };
 
-function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
-  // Pick known features present on this segment, sorted by value descending.
+function SegmentDetail({
+  index,
+  seg,
+  jobId,
+  preset,
+}: {
+  index: number;
+  seg: SegmentDict;
+  jobId: string;
+  preset: string | undefined;
+}) {
   const featureEntries = Object.entries(seg.features)
     .filter(([k]) => k in FEATURE_LABELS)
     .sort(([, a], [, b]) => b - a);
@@ -801,6 +811,20 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
     : seg.interest_score >= 0.35
     ? "text-amber-300"
     : "text-red-400";
+
+  const noteMut = useNoteSegment(jobId, preset);
+  const [localNotes, setLocalNotes] = useState(seg.notes ?? "");
+
+  // Sync textarea when the selected segment changes (index or external update).
+  useEffect(() => { setLocalNotes(seg.notes ?? ""); }, [seg.notes, index]);
+
+  function handleNotesBlur() {
+    const trimmed = localNotes.trim();
+    const prev = seg.notes ?? "";
+    if (trimmed !== prev) {
+      noteMut.mutate({ index, notes: trimmed });
+    }
+  }
 
   return (
     <div className="glass-card rounded-2xl p-4 text-sm">
@@ -862,6 +886,21 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
           ))}
         </ul>
       ) : null}
+
+      <div className="mt-3">
+        <label className="mb-1 block text-[10px] text-white/35">Σημειώσεις</label>
+        <textarea
+          value={localNotes}
+          onChange={(e) => setLocalNotes(e.target.value)}
+          onBlur={handleNotesBlur}
+          placeholder="Προσθήκη σημείωσης…"
+          rows={2}
+          className="w-full resize-none rounded-lg border border-white/8 bg-white/5 px-2.5 py-1.5 text-[12px] text-white/80 placeholder:text-white/25 focus:border-cyan-500/40 focus:outline-none"
+        />
+        {noteMut.isError ? (
+          <p className="mt-1 text-[10px] text-red-400">Αποτυχία αποθήκευσης</p>
+        ) : null}
+      </div>
     </div>
   );
 }

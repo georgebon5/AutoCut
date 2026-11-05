@@ -70,6 +70,7 @@ def _segment_from_dict(d: dict) -> Segment:
         decision=d["decision"],
         decision_source=d.get("decision_source", "auto"),
         reasons=d.get("reasons", []),
+        notes=d.get("notes", ""),
     )
 
 

@@ -467,3 +467,38 @@ def test_openapi_includes_edl_routes(app_client):
     assert "/jobs/{job_id}/segments/{index}" in schema["paths"]
     assert "/jobs/{job_id}/segments/{index}/split" in schema["paths"]
     assert "/jobs/{job_id}/segments/{index}/merge" in schema["paths"]
+
+
+# ---------------------------------------------------------------------------
+# Segment notes (Task 25)
+# ---------------------------------------------------------------------------
+
+def test_patch_notes_saves_and_returns(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.patch(f"/jobs/{jid}/segments/0", json={"notes": "great hook"})
+    assert r.status_code == 200
+    assert r.json()["notes"] == "great hook"
+
+
+def test_patch_notes_round_trips_through_get_edl(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    client.patch(f"/jobs/{jid}/segments/1", json={"notes": "cut this"})
+    edl = client.get(f"/jobs/{jid}/edl").json()
+    assert edl["segments"][1]["notes"] == "cut this"
+
+
+def test_patch_notes_clears_with_empty_string(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    client.patch(f"/jobs/{jid}/segments/0", json={"notes": "temp"})
+    r = client.patch(f"/jobs/{jid}/segments/0", json={"notes": ""})
+    assert r.json()["notes"] == ""
+
+
+def test_patch_missing_all_fields_returns_422(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.patch(f"/jobs/{jid}/segments/0", json={})
+    assert r.status_code == 422

@@ -113,11 +113,12 @@ def patch_segment(
     preset: str | None = Query(default=None),
     session: Session = Depends(get_db),
 ) -> SegmentResponse:
-    """Override a segment's keep/cut decision and/or its start/end boundaries."""
+    """Override a segment's keep/cut decision, boundaries, and/or notes."""
     has_decision = update.decision is not None
     has_trim = update.start is not None or update.end is not None
-    if not has_decision and not has_trim:
-        raise HTTPException(status_code=422, detail="must provide decision, start, or end")
+    has_notes = update.notes is not None
+    if not has_decision and not has_trim and not has_notes:
+        raise HTTPException(status_code=422, detail="must provide decision, start, end, or notes")
     if has_decision and update.decision not in _VALID_DECISIONS:
         raise HTTPException(
             status_code=422,
@@ -178,6 +179,10 @@ def patch_segment(
         seg.start = new_start
         seg.end   = new_end
 
+    # ── Notes ─────────────────────────────────────────────────────────────────
+    if has_notes:
+        seg.notes = update.notes  # type: ignore[assignment]
+
     save_edl(edl, path)
     session.commit()
 
@@ -204,6 +209,7 @@ def patch_segment(
         interest_score=seg.interest_score,
         reasons=seg.reasons,
         features=seg.features,
+        notes=seg.notes,
     )
 
 
@@ -279,6 +285,7 @@ def split_segment(
             interest_score=first.interest_score,
             reasons=first.reasons,
             features=first.features,
+            notes=first.notes,
         ),
         second=SegmentResponse(
             index=index + 1,
@@ -291,6 +298,7 @@ def split_segment(
             interest_score=second.interest_score,
             reasons=second.reasons,
             features=second.features,
+            notes=second.notes,
         ),
     )
 
@@ -350,6 +358,9 @@ def merge_segments(
             merged_reasons.append(r)
     merged_reasons.append("merged")
 
+    # Concatenate notes from both halves (non-empty ones, separated by newline).
+    merged_notes = "\n".join(n for n in (s1.notes, s2.notes) if n)
+
     merged = _Segment(
         clip_id=s1.clip_id,
         start=s1.start,
@@ -359,6 +370,7 @@ def merge_segments(
         decision=merged_decision,   # type: ignore[arg-type]
         decision_source=merged_source,  # type: ignore[arg-type]
         reasons=merged_reasons,
+        notes=merged_notes,
     )
 
     edl.segments = edl.segments[:index] + [merged] + edl.segments[index + 2:]
@@ -376,6 +388,7 @@ def merge_segments(
             interest_score=merged.interest_score,
             reasons=merged.reasons,
             features=merged.features,
+            notes=merged.notes,
         ),
     )
 
@@ -441,6 +454,7 @@ def batch_patch_segments(
             interest_score=seg.interest_score,
             reasons=seg.reasons,
             features=seg.features,
+            notes=seg.notes,
         ))
 
     save_edl(edl, path)

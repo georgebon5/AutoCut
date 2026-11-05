@@ -37,6 +37,7 @@ class Segment:
     decision: Literal["keep", "cut"] = "keep"
     decision_source: Literal["auto", "user"] = "auto"
     reasons: list[str] = field(default_factory=list)
+    notes: str = ""
 
     @property
     def duration(self) -> float:

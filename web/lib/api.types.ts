@@ -113,6 +113,7 @@ export interface SegmentDict {
   decision: Decision;
   decision_source: "auto" | "user";
   reasons: string[];
+  notes?: string;
 }
 
 export interface Clip {
@@ -163,6 +164,7 @@ export interface SegmentUpdate {
   decision?: Decision;
   start?: number;   // new start boundary in seconds
   end?: number;     // new end boundary in seconds
+  notes?: string;   // free-text annotation; "" clears
 }
 
 export interface WordUpdate {
@@ -188,6 +190,7 @@ export interface SegmentResponse {
   interest_score: number;
   reasons: string[];
   features: Record<string, number>;
+  notes: string;
 }
 
 export interface OutputFile {

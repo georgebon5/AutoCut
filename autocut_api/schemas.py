@@ -126,14 +126,16 @@ class CompleteResponse(BaseModel):
 
 
 class SegmentUpdate(BaseModel):
-    """PATCH body for a segment override: decision and/or boundary trim.
+    """PATCH body for a segment override: decision and/or boundary trim and/or notes.
 
     At least one field must be non-None. ``decision`` flips keep/cut;
-    ``start``/``end`` nudge the segment's time boundaries within the clip.
+    ``start``/``end`` nudge the segment's time boundaries within the clip;
+    ``notes`` sets free-text annotation (empty string clears the note).
     """
     decision: str | None = None   # "keep" or "cut"
     start: float | None = None    # new start time in seconds
     end: float | None = None      # new end time in seconds
+    notes: str | None = None      # free-text annotation; "" clears
 
 
 class BatchSegmentItem(BaseModel):
@@ -171,6 +173,7 @@ class SegmentResponse(BaseModel):
     interest_score: float
     reasons: list[str]
     features: dict
+    notes: str = ""
 
 
 class OutputFile(BaseModel):
