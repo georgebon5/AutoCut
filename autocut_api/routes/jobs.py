@@ -44,6 +44,7 @@ _API_OPTION_KEYS = (
     "padding_ms",
     "merge_gap_ms",
     "min_segment_ms",
+    "order_by_time",
     # music_path is a Path, handled specially in _options_to_json like voiceover_audio_path.
 )
 
@@ -63,6 +64,7 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         padding_ms=body.padding_ms,
         merge_gap_ms=body.merge_gap_ms,
         min_segment_ms=body.min_segment_ms,
+        order_by_time=body.order_by_time,
     )
 
 
@@ -255,6 +257,7 @@ def clone_job(
         padding_ms=orig_cfg.get("padding_ms", 0),
         merge_gap_ms=orig_cfg.get("merge_gap_ms", 0),
         min_segment_ms=orig_cfg.get("min_segment_ms", 0),
+        order_by_time=orig_cfg.get("order_by_time", False),
     )
     if orig_cfg.get("voiceover_audio_path"):
         vo = Path(orig_cfg["voiceover_audio_path"])

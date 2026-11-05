@@ -69,6 +69,8 @@ export interface JobCreateRequest {
   merge_gap_ms?: number;
   /** Drop kept segments shorter than this (ms) from the final cut. 0 = disabled. */
   min_segment_ms?: number;
+  /** Sort clips by creation_time before processing so multi-clip jobs run in shoot order. */
+  order_by_time?: boolean;
 }
 
 export interface Upload {

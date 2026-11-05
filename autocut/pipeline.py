@@ -110,6 +110,10 @@ class PipelineOptions:
     # 0 = disabled. 500–800 ms prevents sub-second "blip" segments that score
     # highly but create jarring micro-cuts in the rendered output.
     min_segment_ms: int = 0
+    # When True and all clips carry creation_time metadata, sort the clips
+    # chronologically before processing so multi-clip jobs play in shoot order
+    # regardless of upload order.
+    order_by_time: bool = False
 
 
 @dataclass
@@ -222,6 +226,11 @@ def run_pipeline(
         proxies = ingest_clips(clips, output_dir, cfg.ingest)
     except IngestError as e:
         raise PipelineError(f"ingest failed: {e}") from e
+    if options.order_by_time and all(p.creation_time is not None for p in proxies):
+        proxies = sorted(proxies, key=lambda p: p.creation_time)   # type: ignore[arg-type]
+        rep.info("clips re-ordered by creation_time")
+    elif options.order_by_time:
+        rep.info("order_by_time: some clips lack creation_time — keeping upload order")
     for p in proxies:
         rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}  {p.fps:.2f}fps")
 
@@ -666,6 +675,11 @@ def _run_voiceover_pipeline(
         proxies = ingest_clips(clips, output_dir, cfg.ingest)
     except IngestError as e:
         raise PipelineError(f"ingest failed: {e}") from e
+    if options.order_by_time and all(p.creation_time is not None for p in proxies):
+        proxies = sorted(proxies, key=lambda p: p.creation_time)   # type: ignore[arg-type]
+        rep.info("clips re-ordered by creation_time")
+    elif options.order_by_time:
+        rep.info("order_by_time: some clips lack creation_time — keeping upload order")
     for p in proxies:
         rep.info(f"{p.clip_id}  {p.duration:.1f}s  {p.width}×{p.height}")
     for p in proxies:

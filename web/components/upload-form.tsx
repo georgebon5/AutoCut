@@ -58,6 +58,7 @@ export default function UploadForm() {
   const [paddingMs, setPaddingMs] = useState(150);
   const [mergeGapMs, setMergeGapMs] = useState(0);
   const [minSegmentMs, setMinSegmentMs] = useState(0);
+  const [orderByTime, setOrderByTime] = useState(false);
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -181,6 +182,7 @@ export default function UploadForm() {
         padding_ms: paddingMs > 0 ? paddingMs : undefined,
         merge_gap_ms: mergeGapMs > 0 ? mergeGapMs : undefined,
         min_segment_ms: minSegmentMs > 0 ? minSegmentMs : undefined,
+        order_by_time: orderByTime || undefined,
       });
       router.push("/");
     } catch (e) {
@@ -492,6 +494,24 @@ export default function UploadForm() {
             <span>500 ms — προτεινόμενο</span>
             <span>2000 ms</span>
           </div>
+        </div>
+
+        {/* Clip ordering */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <label className="flex cursor-pointer items-center gap-3 text-xs text-white/70">
+            <input
+              type="checkbox"
+              checked={orderByTime}
+              onChange={(e) => setOrderByTime(e.target.checked)}
+              className="h-4 w-4 accent-cyan-400"
+            />
+            <span>
+              Αυτόματη ταξινόμηση clips κατά ημερομηνία λήψης
+              <span className="ml-1 text-white/30">
+                (χρησιμοποιεί μεταδεδομένα κάμερας — δεν επηρεάζει αν λείπουν)
+              </span>
+            </span>
+          </label>
         </div>
 
         {/* Background music */}

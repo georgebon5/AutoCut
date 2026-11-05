@@ -88,6 +88,9 @@ class JobCreateRequest(BaseModel):
     # Drop kept segments shorter than this (ms) from the final cut.
     # 0 = disabled. 500–800 ms prevents jarring sub-second blip segments.
     min_segment_ms: int = 0
+    # Sort clips by creation_time metadata before analysis so multi-clip
+    # jobs run in shoot order regardless of upload order.
+    order_by_time: bool = False
 
 
 class CreateUploadRequest(BaseModel):
