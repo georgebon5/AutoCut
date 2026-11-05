@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from autocut.captions import write_cut_captions
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
 from autocut.config import AutoCutConfig, TransitionConfig
+from autocut.fcpxml import save_fcpxml
 from autocut.edl import EDL, save_edl
 from autocut.thumbnail import extract_thumbnail
 from autocut.features import enrich_segments
@@ -471,6 +472,15 @@ def run_pipeline(
             write_chapters_json(chapters, output_dir / f"chapters{ch_stem}.json")
             rep.info(f"wrote {len(chapters)} chapters")
 
+        # FCPXML: NLE-ready edit decision list pointing at original footage.
+        fcp_stem = stem.removeprefix("rough_cut") or ""
+        fcp_path = output_dir / f"rough_cut{fcp_stem}.fcpxml"
+        try:
+            save_fcpxml(edl, fcp_path, sequence_name=fcp_path.stem)
+            rep.info(f"wrote {fcp_path.name}")
+        except Exception:
+            pass  # FCPXML is a convenience; never abort the pipeline for it.
+
         # Cut-aligned captions: timestamps match the mp4 we just produced,
         # so the user can burn them in or import into an NLE without drift.
         if do_captions and any(t.words for t in all_transcripts.values()):
@@ -762,6 +772,12 @@ def _run_voiceover_pipeline(
         write_chapters_txt(chapters, output_dir / "chapters.txt")
         write_chapters_json(chapters, output_dir / "chapters.json")
         rep.info(f"wrote {len(chapters)} chapters")
+
+    try:
+        save_fcpxml(edl, output_dir / "rough_cut.fcpxml", sequence_name="rough_cut")
+        rep.info("wrote rough_cut.fcpxml")
+    except Exception:
+        pass
 
     return PipelineResult(
         proxies=proxies,

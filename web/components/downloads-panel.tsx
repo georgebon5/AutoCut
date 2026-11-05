@@ -28,6 +28,7 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const videos = outputs.filter((o) => o.kind === “video”);
   const thumbnails = outputs.filter((o) => o.kind === “thumbnail”);
   const chapterFiles = outputs.filter((o) => o.kind === “chapters_txt”);
+  const fcpxmlFiles = outputs.filter((o) => o.kind === “fcpxml”);
 
   return (
     <section className=”flex flex-col gap-3”>
@@ -53,6 +54,14 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
                 key={o.name}
                 file={o}
                 href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
+              />
+            ))}
+            {fcpxmlFiles.map((o) => (
+              <OutputRow
+                key={o.name}
+                file={o}
+                href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
+                label=”FCP XML”
               />
             ))}
           </ul>
@@ -168,7 +177,7 @@ function ThumbnailStrip({
 }
 
 
-function OutputRow({ file, href }: { file: OutputFile; href: string }) {
+function OutputRow({ file, href, label = "Download" }: { file: OutputFile; href: string; label?: string }) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-black/30 px-3 py-2.5">
       <div className="min-w-0">
@@ -182,7 +191,7 @@ function OutputRow({ file, href }: { file: OutputFile; href: string }) {
         download={file.name}
         className="shrink-0 rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-400/40 hover:bg-cyan-400/20"
       >
-        Download
+        {label}
       </a>
     </li>
   );

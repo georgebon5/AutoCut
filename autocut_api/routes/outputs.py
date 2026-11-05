@@ -28,6 +28,7 @@ _OUTPUT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("thumbnail*.jpg", "thumbnail"),
     ("chapters*.txt", "chapters_txt"),
     ("chapters*.json", "chapters_json"),
+    ("*.fcpxml", "fcpxml"),
 )
 
 _MEDIA_TYPES = {
@@ -38,6 +39,7 @@ _MEDIA_TYPES = {
     "thumbnail": "image/jpeg",
     "chapters_txt": "text/plain; charset=utf-8",
     "chapters_json": "application/json",
+    "fcpxml": "application/xml",
 }
 
 
