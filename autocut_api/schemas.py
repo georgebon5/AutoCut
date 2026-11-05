@@ -36,6 +36,12 @@ class JobPatchRequest(BaseModel):
     label: str | None = None
 
 
+class JobCloneRequest(BaseModel):
+    """Optional overrides when cloning a job. Unset fields inherit from the original."""
+    preset: str | None = None   # override the pipeline preset
+    label: str | None = None    # label for the new job
+
+
 class JobCreateRequest(BaseModel):
     """Kicks off a pipeline run against one or more completed uploads."""
     upload_ids: list[str]

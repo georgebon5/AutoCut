@@ -3,7 +3,7 @@
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import CaptionStylePicker from "@/components/caption-style-picker";
@@ -11,7 +11,7 @@ import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
-import { ApiError, getChapters, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
+import { ApiError, cloneJob, getChapters, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
 import { useJobEvents } from "@/lib/use-job-events";
 import type { CaptionStyle, Edl, Job, JobConfig } from "@/lib/api.types";
 import { usePersistedState } from "@/lib/use-persisted-state";
@@ -35,6 +35,8 @@ export default function ReviewPage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
   const qc = useQueryClient();
+  const router = useRouter();
+  const [showClone, setShowClone] = useState(false);
 
   const [preset, setPreset] = useState<string | null>(null);
   // UI preferences are persisted per-job in localStorage so a page reload
@@ -215,12 +217,22 @@ export default function ReviewPage() {
             Οι αλλαγές μου →
           </Link>
         </div>
-        <RerenderButton
-          busy={rendering}
-          disabled={job?.status !== "done"}
-          dirty={dirty}
-          onClick={() => renderMut.mutate()}
-        />
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <RerenderButton
+            busy={rendering}
+            disabled={job?.status !== "done"}
+            dirty={dirty}
+            onClick={() => renderMut.mutate()}
+          />
+          <button
+            type="button"
+            onClick={() => setShowClone((v) => !v)}
+            disabled={job?.status !== "done"}
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            {showClone ? "Ακύρωση" : "⟳ Clone job"}
+          </button>
+        </div>
       </header>
 
       {renderMut.isError ? (
@@ -239,6 +251,18 @@ export default function ReviewPage() {
             {job.error}
           </pre>
         </div>
+      ) : null}
+
+      {showClone && job ? (
+        <ClonePanel
+          jobId={jobId}
+          currentPreset={job.config?.preset ?? "none"}
+          onCloned={(newId) => {
+            setShowClone(false);
+            router.push(`/jobs/${newId}/review`);
+          }}
+          onCancel={() => setShowClone(false)}
+        />
       ) : null}
 
       {isAll ? (
@@ -643,6 +667,98 @@ function fmtDur(s: number): string {
   const sec = Math.round(s % 60);
   return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
+
+// ---------------------------------------------------------------------------
+// Clone panel — re-run same clips with optional preset override
+// ---------------------------------------------------------------------------
+
+const CLONE_PRESET_OPTIONS: { value: string; label: string }[] = [
+  { value: "none",   label: "Ίδιο (χωρίς preset)" },
+  { value: "tight",  label: "Tight" },
+  { value: "medium", label: "Medium" },
+  { value: "loose",  label: "Loose" },
+  { value: "all",    label: "Και τα τρία (all)" },
+];
+
+function ClonePanel({
+  jobId,
+  currentPreset,
+  onCloned,
+  onCancel,
+}: {
+  jobId: string;
+  currentPreset: string;
+  onCloned: (newJobId: string) => void;
+  onCancel: () => void;
+}) {
+  const [preset, setPreset] = useState(currentPreset);
+  const [error, setError] = useState<string | null>(null);
+
+  const cloneMut = useMutation({
+    mutationFn: () =>
+      cloneJob(jobId, {
+        preset: preset !== currentPreset ? preset : undefined,
+      }),
+    onSuccess: (job) => onCloned(job.id),
+    onError: (e) => setError((e as ApiError | Error).message),
+  });
+
+  return (
+    <div className="glass-card rounded-2xl p-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-white/50">
+        Clone job
+      </p>
+      <p className="mb-4 text-xs text-white/40">
+        Τα ίδια clips ξαναπεράσουν από το pipeline — χρήσιμο για να δοκιμάσεις
+        διαφορετικό preset χωρίς νέο upload.
+      </p>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <span className="w-20 shrink-0 text-xs text-white/50">Preset</span>
+        <div className="flex flex-wrap gap-1.5">
+          {CLONE_PRESET_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => setPreset(o.value)}
+              className={[
+                "rounded-lg px-2.5 py-1 text-xs transition",
+                preset === o.value
+                  ? "bg-indigo-500/20 font-medium text-indigo-200 ring-1 ring-indigo-400/40"
+                  : "text-white/50 hover:bg-white/5 hover:text-white/80",
+              ].join(" ")}
+            >
+              {o.label}
+              {o.value === currentPreset ? (
+                <span className="ml-1 text-white/30">(τρέχον)</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error ? (
+        <p className="mb-3 text-xs text-red-400">{error}</p>
+      ) : null}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => cloneMut.mutate()}
+          disabled={cloneMut.isPending}
+          className="rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {cloneMut.isPending ? "Δημιουργία…" : "⟳ Clone"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/50 transition hover:text-white/80"
+        >
+          Ακύρωση
+        </button>
+      </div>
+    </div>
+  );
+}
+
 
 function DurationBar({ edl }: { edl: Edl | undefined }) {
   if (!edl) return null;

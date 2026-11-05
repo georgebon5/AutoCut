@@ -22,7 +22,8 @@ from autocut.pipeline import PipelineError, PipelineOptions, validate_options
 from autocut_api.config import ApiConfig
 from autocut_api.dependencies import get_config, get_db
 from autocut_api.models import Job, SegmentOverride, Upload
-from autocut_api.schemas import JobCreateRequest, JobPatchRequest, JobResponse
+from autocut.edl import load_edl
+from autocut_api.schemas import JobCloneRequest, JobCreateRequest, JobPatchRequest, JobResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -192,6 +193,104 @@ def create_job(
     runner.submit(lambda: pipeline_fn(job_id, workspace, clip_paths, session_factory))
 
     return _job_response(job)
+
+
+@router.post("/{job_id}/clone", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
+def clone_job(
+    job_id: str,
+    body: JobCloneRequest,
+    request: Request,
+    cfg: ApiConfig = Depends(get_config),
+    session: Session = Depends(get_db),
+) -> JobResponse:
+    """Re-run the same clips with (optionally) different settings.
+
+    Clip paths are recovered from the original job's EDL so no re-upload is
+    needed. Voiceover and music paths are inherited from the original config
+    when the files still exist on disk.
+    """
+    original = session.get(Job, job_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not original.workspace:
+        raise HTTPException(status_code=409, detail="original job has no workspace")
+
+    orig_cfg: dict = json.loads(original.config_json) if original.config_json else {}
+    workspace = Path(original.workspace)
+
+    # Find an EDL to extract the original clip paths from.
+    orig_preset = orig_cfg.get("preset", "none")
+    candidates = ["edl.json"] + [
+        f"edl_{p}.json" for p in (orig_preset, "tight", "medium", "loose") if p != "none"
+    ]
+    edl_path = next((workspace / f for f in candidates if (workspace / f).exists()), None)
+    if edl_path is None:
+        raise HTTPException(
+            status_code=409,
+            detail="original job has no EDL — cannot recover clip paths for clone",
+        )
+
+    edl = load_edl(edl_path)
+    clip_paths = [Path(c.original_path) for c in edl.clips]
+    missing = [str(p) for p in clip_paths if not p.exists()]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"clip(s) no longer on disk: {', '.join(missing)}",
+        )
+
+    # Build options: inherit original, apply body overrides.
+    new_preset = body.preset or orig_preset
+    opts = PipelineOptions(
+        preset=new_preset,
+        hook=orig_cfg.get("hook", False),
+        pacing=orig_cfg.get("pacing", False),
+        zoom=orig_cfg.get("zoom", False),
+        audio_enhance=orig_cfg.get("audio_enhance", False),
+        audio_denoise=orig_cfg.get("audio_denoise", False),
+        output_aspect=orig_cfg.get("output_aspect", "source"),
+        semantic_match=orig_cfg.get("semantic_match", False),
+        transition_type=orig_cfg.get("transition_type", "none"),
+        color_grading=orig_cfg.get("color_grading", "none"),
+        padding_ms=orig_cfg.get("padding_ms", 0),
+        merge_gap_ms=orig_cfg.get("merge_gap_ms", 0),
+        min_segment_ms=orig_cfg.get("min_segment_ms", 0),
+    )
+    if orig_cfg.get("voiceover_audio_path"):
+        vo = Path(orig_cfg["voiceover_audio_path"])
+        if vo.exists():
+            opts.voiceover_audio_path = vo
+    if orig_cfg.get("music_path"):
+        mu = Path(orig_cfg["music_path"])
+        if mu.exists():
+            opts.music_path = mu
+    resolved = cfg.resolved_model_path
+    if resolved.exists():
+        opts.model_path = resolved
+
+    new_job = Job(
+        config_json=_options_to_json(opts),
+        label=body.label or (
+            f"Clone — {original.label}" if original.label else None
+        ),
+    )
+    session.add(new_job)
+    session.flush()
+
+    new_workspace = cfg.jobs_dir / new_job.id
+    new_workspace.mkdir(parents=True, exist_ok=True)
+    new_job.workspace = str(new_workspace)
+    session.commit()
+    session.refresh(new_job)
+
+    session_factory = request.app.state.session_factory
+    pipeline_fn = request.app.state.pipeline_fn
+    runner = request.app.state.runner
+    new_job_id = new_job.id
+    runner.submit(
+        lambda: pipeline_fn(new_job_id, new_workspace, clip_paths, session_factory)
+    )
+    return _job_response(new_job)
 
 
 @router.get("", response_model=list[JobResponse])

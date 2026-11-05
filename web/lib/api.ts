@@ -105,6 +105,16 @@ export const createJob = (body: JobCreateRequest) =>
 
 export const getJob = (id: string) => request<Job>(`/jobs/${id}`);
 
+export const cloneJob = (
+  id: string,
+  overrides?: { preset?: string; label?: string },
+) =>
+  request<Job>(`/jobs/${id}/clone`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(overrides ?? {}),
+  });
+
 export const deleteJob = (id: string) =>
   request<void>(`/jobs/${id}`, { method: "DELETE", expectJson: false });
 
