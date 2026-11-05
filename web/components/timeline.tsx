@@ -219,14 +219,26 @@ function ClipRow({
           const keep = seg.decision === "keep";
           const active = selectedIndex === index;
           const next: Decision = keep ? "cut" : "keep";
+          // Score drives opacity for kept blocks: strong keeps are vivid,
+          // borderline keeps are more transparent. Clamp to [0.25, 1].
+          const scoreOpacity = keep
+            ? Math.max(0.25, Math.min(1.0, 0.25 + seg.interest_score * 0.75))
+            : 1;
+          const dur = seg.end - seg.start;
           return (
             <button
               key={index}
               type="button"
               onClick={() => onSelect(index)}
               onDoubleClick={() => onToggle(index, next)}
-              style={{ left, width: w, height: ROW_HEIGHT_PX }}
-              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · ${seg.decision} · διπλό κλικ = εναλλαγή`}
+              style={{
+                left,
+                width: w,
+                height: ROW_HEIGHT_PX,
+                // Active selection always shows at full opacity regardless of score.
+                opacity: active ? 1 : scoreOpacity,
+              }}
+              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · score ${seg.interest_score.toFixed(2)} · ${seg.decision}`}
               className={[
                 "absolute top-0 rounded-md border transition duration-200",
                 keep
@@ -234,7 +246,26 @@ function ClipRow({
                   : "border-dashed border-white/15 bg-white/[0.03] hover:bg-white/10",
                 active ? "ring-2 ring-fuchsia-400/70" : "",
               ].join(" ")}
-            />
+            >
+              {/* Show score label inside wide-enough kept blocks */}
+              {keep && w >= 38 ? (
+                <span
+                  className="pointer-events-none absolute bottom-1 right-1 font-mono text-[9px] text-cyan-200/70 leading-none"
+                  aria-hidden
+                >
+                  {seg.interest_score.toFixed(2)}
+                </span>
+              ) : null}
+              {/* Duration label for very wide blocks */}
+              {w >= 60 ? (
+                <span
+                  className="pointer-events-none absolute top-1 left-1 font-mono text-[9px] text-white/40 leading-none"
+                  aria-hidden
+                >
+                  {dur.toFixed(1)}s
+                </span>
+              ) : null}
+            </button>
           );
         })}
       </div>
@@ -282,32 +313,84 @@ function WaveformBackground({
 }
 
 
+// Feature keys shown in the breakdown, in display order.
+const FEATURE_LABELS: Record<string, string> = {
+  energy:           "Ενέργεια",
+  speech_rate:      "Ρυθμός ομιλίας",
+  pitch_variance:   "Pitch var.",
+  motion:           "Κίνηση",
+  keyword_density:  "Keywords",
+  scene_change:     "Scene change",
+  silence_ratio:    "Σιωπή",
+  filler_density:   "Fillers",
+};
+
 function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
+  // Pick known features present on this segment, sorted by value descending.
+  const featureEntries = Object.entries(seg.features)
+    .filter(([k]) => k in FEATURE_LABELS)
+    .sort(([, a], [, b]) => b - a);
+
+  const scoreColor = seg.interest_score >= 0.65
+    ? "text-emerald-300"
+    : seg.interest_score >= 0.35
+    ? "text-amber-300"
+    : "text-red-400";
+
   return (
     <div className="glass-card rounded-2xl p-4 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-white/90">
-          Κομμάτι <span className="font-mono text-white/50">#{index}</span> · <span className="font-mono text-white/60">{seg.clip_id}</span>
-        </span>
-        <span
-          className={`rounded-full border px-2 py-0.5 text-xs ${
-            seg.decision === "keep"
-              ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
-              : "border-white/10 bg-white/5 text-white/60"
-          }`}
-        >
-          {seg.decision === "keep" ? "μέσα" : "έξω"} · {seg.decision_source === "user" ? "εσύ" : "αυτόματο"}
-        </span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="font-medium text-white/90">
+            Κομμάτι <span className="font-mono text-white/50">#{index}</span>
+            <span className="ml-2 font-mono text-white/40">{seg.clip_id}</span>
+          </span>
+          <div className="mt-1 font-mono text-xs text-white/40">
+            {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s
+            <span className="ml-2 text-white/30">({(seg.end - seg.start).toFixed(2)}s)</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span
+            className={`rounded-full border px-2 py-0.5 text-xs ${
+              seg.decision === "keep"
+                ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
+                : "border-white/10 bg-white/5 text-white/60"
+            }`}
+          >
+            {seg.decision === "keep" ? "μέσα" : "έξω"} · {seg.decision_source === "user" ? "εσύ" : "auto"}
+          </span>
+          <span className={`font-mono text-lg font-light leading-none ${scoreColor}`}>
+            {seg.interest_score.toFixed(2)}
+          </span>
+        </div>
       </div>
-      <div className="mt-2 font-mono text-xs text-white/50">
-        {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s · βαθμός {seg.interest_score.toFixed(2)}
-      </div>
+
+      {featureEntries.length > 0 ? (
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+          {featureEntries.map(([key, val]) => (
+            <div key={key} className="flex flex-col gap-0.5">
+              <div className="flex justify-between text-[10px] text-white/40">
+                <span>{FEATURE_LABELS[key] ?? key}</span>
+                <span className="font-mono">{val.toFixed(2)}</span>
+              </div>
+              <div className="h-1 w-full overflow-hidden rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500"
+                  style={{ width: `${Math.min(100, val * 100)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {seg.reasons.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-1.5 text-xs">
+        <ul className="mt-3 flex flex-wrap gap-1.5">
           {seg.reasons.map((r, i) => (
             <li
               key={i}
-              className="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-white/70"
+              className="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] text-white/60"
             >
               {r}
             </li>
