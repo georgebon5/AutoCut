@@ -59,6 +59,7 @@ export default function ReviewPage() {
   // lets us re-seek to the same position on a second click.
   const [seekRequest, setSeekRequest] = useState<{ time: number; seq: number } | undefined>();
   const seekSeq = useRef(0);
+  const [currentTime, setCurrentTime] = useState(0);
   // Reset dirty when the user switches preset — each preset has its own EDL
   // + rendered mp4, so dirty-against-preset-A doesn't apply to preset B.
   useEffect(() => {
@@ -197,6 +198,7 @@ export default function ReviewPage() {
             rendering={rendering}
             edl={edlQuery.data}
             seekRequest={seekRequest}
+            onPlaybackTime={setCurrentTime}
           />
           <div className="glass-card flex flex-col gap-4 rounded-2xl p-4">
             <label className="flex items-center gap-3 text-sm text-white/80">
@@ -241,6 +243,7 @@ export default function ReviewPage() {
             preset={edlPreset ?? undefined}
             edl={edlQuery.data}
             onDirty={() => setDirty(true)}
+            currentTime={currentTime}
           />
           <DownloadsPanel
             jobId={jobId}

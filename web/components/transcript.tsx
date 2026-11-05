@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
@@ -17,6 +17,8 @@ interface Props {
   onSelect?: (index: number) => void;
   /** Called after a successful toggle so the parent can flag "needs re-render". */
   onDirty?: () => void;
+  /** Output-timeline position from the video player — drives live word highlight. */
+  currentTime?: number;
 }
 
 /** Carries the original word position in `transcript.words` for PATCH targeting. */
@@ -25,6 +27,19 @@ interface WordAssignment {
   word: WordTimestamp;
   wordIndex: number;
   clipId: string;
+}
+
+/** Map an output-timeline position back to { clipId, sourceTime } via render_chunks. */
+function outputToSource(t: number, edl: Edl): { clipId: string; sourceTime: number } | null {
+  for (const chunk of edl.render_chunks) {
+    if (chunk.segment_index < 0) continue;
+    if (t >= chunk.output_start && t < chunk.output_end) {
+      const seg = edl.segments[chunk.segment_index];
+      if (!seg) continue;
+      return { clipId: seg.clip_id, sourceTime: seg.start + (t - chunk.output_start) };
+    }
+  }
+  return null;
 }
 
 /** O(words + segments·log) assignment of each word to the segment that covers it. */
@@ -67,12 +82,26 @@ function findContainingSegment(
 
 type Mode = "toggle" | "edit";
 
-export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty }: Props) {
+export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty, currentTime }: Props) {
   const toggleMut = useSegmentToggle(jobId, preset);
   const editMut = useWordEdit(jobId, preset);
   const [mode, setMode] = useState<Mode>("toggle");
   // Which word is currently being edited: (clipId, wordIndex) tuple.
   const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
+
+  // Find which word is currently playing based on the video's output time.
+  const activeWord = useMemo(() => {
+    if (currentTime === undefined) return null;
+    const src = outputToSource(currentTime, edl);
+    if (!src) return null;
+    const transcript = edl.transcripts.find((t) => t.clip_id === src.clipId);
+    if (!transcript) return null;
+    const idx = transcript.words.findIndex(
+      (w) => src.sourceTime >= w.start && src.sourceTime < w.end,
+    );
+    if (idx < 0) return null;
+    return { clipId: src.clipId, wordIndex: idx };
+  }, [currentTime, edl]);
 
   // Group assignments by clip for display, preserving transcript word order.
   const groupedByClip = useMemo(() => {
@@ -127,6 +156,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             segments={edl.segments}
             assignments={groupedByClip.get(t.clip_id) ?? []}
             selectedIndex={selectedIndex ?? null}
+            activeWord={activeWord}
             mode={mode}
             editing={editing}
             onStartEdit={(clipId, wordIndex) => setEditing({ clipId, wordIndex })}
@@ -197,6 +227,7 @@ function ClipTranscript({
   segments,
   assignments,
   selectedIndex,
+  activeWord,
   mode,
   editing,
   onStartEdit,
@@ -208,6 +239,7 @@ function ClipTranscript({
   segments: SegmentDict[];
   assignments: WordAssignment[];
   selectedIndex: number | null;
+  activeWord: { clipId: string; wordIndex: number } | null;
   mode: Mode;
   editing: { clipId: string; wordIndex: number } | null;
   onStartEdit: (clipId: string, wordIndex: number) => void;
@@ -215,6 +247,10 @@ function ClipTranscript({
   onCancelEdit: () => void;
   onSelect: (segIndex: number) => void;
 }) {
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [activeWord?.clipId, activeWord?.wordIndex]);
   if (assignments.length === 0) return null;
 
   return (
@@ -243,9 +279,12 @@ function ClipTranscript({
               />
             );
           }
+          const isPlaying =
+            activeWord?.clipId === a.clipId && activeWord?.wordIndex === a.wordIndex;
           return (
             <button
               key={i}
+              ref={isPlaying ? activeRef : undefined}
               type="button"
               onClick={() => {
                 if (mode === "edit") {
@@ -260,6 +299,7 @@ function ClipTranscript({
                   ? "text-white/90 hover:bg-cyan-400/15"
                   : "text-white/35 line-through hover:bg-white/5",
                 active ? "ring-1 ring-fuchsia-400/70" : "",
+                isPlaying ? "bg-amber-400/30 ring-1 ring-amber-400/60 text-amber-100" : "",
                 mode === "edit" ? "cursor-text hover:bg-cyan-400/20" : "",
               ].join(" ")}
             >

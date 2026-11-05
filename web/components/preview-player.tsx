@@ -19,9 +19,11 @@ interface Props {
   /** When set, the player seeks to this output-timeline position (seconds).
    *  Uses a {time, seq} tuple so repeated seeks to the same position still fire. */
   seekRequest?: { time: number; seq: number };
+  /** Called with the video's current output-time on every timeupdate event. */
+  onPlaybackTime?: (t: number) => void;
 }
 
-export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false, edl, seekRequest }: Props) {
+export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false, edl, seekRequest, onPlaybackTime }: Props) {
   const outputsQ = useQuery({
     queryKey: ["outputs", jobId, cacheKey],
     queryFn: () => listOutputs(jobId),
@@ -72,6 +74,7 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
           rendering={rendering}
           cutChunks={cutChunks}
           seekRequest={seekRequest}
+          onPlaybackTime={onPlaybackTime}
         />
         {rendering ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 text-center text-sm text-cyan-100 backdrop-blur-sm">
@@ -129,11 +132,13 @@ function VideoWithSpaceToggle({
   rendering,
   cutChunks,
   seekRequest,
+  onPlaybackTime,
 }: {
   src: string;
   rendering: boolean;
   cutChunks: RenderChunk[];
   seekRequest?: { time: number; seq: number };
+  onPlaybackTime?: (t: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Keep the latest cutChunks in a ref so the timeupdate handler always sees
@@ -188,6 +193,9 @@ function VideoWithSpaceToggle({
   // chunk whose segment is now cut, jump to that chunk's end. ~250ms update
   // rate is enough to be imperceptible; a tiny 0.001s nudge past the end
   // avoids re-landing in the same chunk due to float rounding.
+  const onPlaybackTimeRef = useRef(onPlaybackTime);
+  useEffect(() => { onPlaybackTimeRef.current = onPlaybackTime; }, [onPlaybackTime]);
+
   const onTimeUpdate = () => {
     const v = videoRef.current;
     if (!v) return;
@@ -198,6 +206,7 @@ function VideoWithSpaceToggle({
         return;
       }
     }
+    onPlaybackTimeRef.current?.(now);
   };
 
   return (
