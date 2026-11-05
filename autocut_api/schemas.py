@@ -76,6 +76,9 @@ class JobCreateRequest(BaseModel):
     # Milliseconds of audio context to preserve on each side of a cut.
     # 0 = hard boundary; 150 is a good default to avoid clipping syllables.
     padding_ms: int = 0
+    # Close inter-segment gaps shorter than this (ms). 0 = disabled.
+    # 400–600 ms is a good range for removing micro-cut stutters.
+    merge_gap_ms: int = 0
 
 
 class CreateUploadRequest(BaseModel):

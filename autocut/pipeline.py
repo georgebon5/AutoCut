@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
+from autocut.merge import merge_close_segments
 from autocut.padding import apply_padding
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
 from autocut.cmx_edl import save_cmx
@@ -101,6 +102,10 @@ class PipelineOptions:
     # 0 = hard boundary at the exact VAD/silence edge; 150 ms is a good
     # default to avoid clipping the first/last syllable.
     padding_ms: int = 0
+    # Automatically close gaps between adjacent kept segments shorter than
+    # this value (applied after padding). 0 = disabled. 400–600 ms removes
+    # audible micro-cut stutters while leaving intentional pauses intact.
+    merge_gap_ms: int = 0
 
 
 @dataclass
@@ -518,15 +523,18 @@ def run_pipeline(
                 caption_paths.append(path)
                 rep.info(f"wrote {path.name}")
 
-    padding_s = options.padding_ms / 1000.0
+    padding_s  = options.padding_ms   / 1000.0
+    merge_gap_s = options.merge_gap_ms / 1000.0
 
     if not presets_to_render:
         segs = apply_padding(all_segments, proxies, padding_s)
+        segs = merge_close_segments(segs, merge_gap_s)
         _render_pass(segs, "rough_cut")
     else:
         for p in presets_to_render:
             segs = select_segments(all_segments, p, cfg.presets, pacing=cfg.pacing)
             segs = apply_padding(segs, proxies, padding_s)
+            segs = merge_close_segments(segs, merge_gap_s)
             kept = sum(s.duration for s in segs if s.decision == "keep")
             target = cfg.presets.targets[p]
             rep.info(f"preset={p}: target {target:.0f}s, selected {kept:.0f}s")

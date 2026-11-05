@@ -30,7 +30,7 @@ dev = [
     "pytest-cov>=5.0",
     "numpy>=1.26",
     "scipy>=1.12",
-    "httpx>=0.25",
+    "httpx>=0.25,<0.28",
 ]
 
 [project.scripts]

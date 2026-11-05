@@ -56,6 +56,7 @@ export default function UploadForm() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [colorGrading, setColorGrading] = useState<"none" | "warm" | "cool" | "cinematic" | "vibrant">("none");
   const [paddingMs, setPaddingMs] = useState(150);
+  const [mergeGapMs, setMergeGapMs] = useState(0);
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -177,6 +178,7 @@ export default function UploadForm() {
         webhook_url: webhookUrl.trim() || undefined,
         color_grading: colorGrading !== "none" ? colorGrading : undefined,
         padding_ms: paddingMs > 0 ? paddingMs : undefined,
+        merge_gap_ms: mergeGapMs > 0 ? mergeGapMs : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -433,6 +435,33 @@ export default function UploadForm() {
             <span>0 — σφιχτό</span>
             <span>150 ms — προτεινόμενο</span>
             <span>300 ms</span>
+          </div>
+        </div>
+
+        {/* Gap closing */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-white/50">
+              Κλείσιμο μικρών κενών{" "}
+              <span className="text-white/30">(συγχώνευση adjacent segments με μικρό gap)</span>
+            </p>
+            <span className="font-mono text-xs text-white/60">
+              {mergeGapMs === 0 ? "off" : `≤ ${mergeGapMs} ms`}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={800}
+            step={50}
+            value={mergeGapMs}
+            onChange={(e) => setMergeGapMs(Number(e.target.value))}
+            className="w-full accent-indigo-400"
+          />
+          <div className="flex justify-between text-[10px] text-white/25">
+            <span>0 — απενεργοποιημένο</span>
+            <span>500 ms — προτεινόμενο</span>
+            <span>800 ms</span>
           </div>
         </div>
 

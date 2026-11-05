@@ -65,6 +65,8 @@ export interface JobCreateRequest {
   color_grading?: ColorGrading;
   /** Milliseconds of audio context to keep on each side of a cut (0 = hard boundary). */
   padding_ms?: number;
+  /** Close inter-segment gaps shorter than this (ms). 0 = disabled. */
+  merge_gap_ms?: number;
 }
 
 export interface Upload {
