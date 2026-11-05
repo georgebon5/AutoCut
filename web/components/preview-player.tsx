@@ -16,9 +16,12 @@ interface Props {
   rendering?: boolean;
   /** Current EDL — drives live preview skipping without re-render. */
   edl?: Edl;
+  /** When set, the player seeks to this output-timeline position (seconds).
+   *  Uses a {time, seq} tuple so repeated seeks to the same position still fire. */
+  seekRequest?: { time: number; seq: number };
 }
 
-export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false, edl }: Props) {
+export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = false, edl, seekRequest }: Props) {
   const outputsQ = useQuery({
     queryKey: ["outputs", jobId, cacheKey],
     queryFn: () => listOutputs(jobId),
@@ -68,6 +71,7 @@ export default function PreviewPlayer({ jobId, preset, cacheKey, rendering = fal
           src={src}
           rendering={rendering}
           cutChunks={cutChunks}
+          seekRequest={seekRequest}
         />
         {rendering ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 text-center text-sm text-cyan-100 backdrop-blur-sm">
@@ -124,16 +128,32 @@ function VideoWithSpaceToggle({
   src,
   rendering,
   cutChunks,
+  seekRequest,
 }: {
   src: string;
   rendering: boolean;
   cutChunks: RenderChunk[];
+  seekRequest?: { time: number; seq: number };
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Keep the latest cutChunks in a ref so the timeupdate handler always sees
   // the current set — attaching a new listener on every change would churn.
   const cutRef = useRef<RenderChunk[]>(cutChunks);
   useEffect(() => { cutRef.current = cutChunks; }, [cutChunks]);
+
+  // Seek when a segment is clicked in the Timeline. The {time, seq} shape
+  // means clicking the same segment twice still triggers the effect.
+  useEffect(() => {
+    if (!seekRequest) return;
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = seekRequest.time;
+    // Briefly pause-then-play so the seek is visible even if already playing.
+    if (!v.paused) {
+      v.pause();
+      void v.play();
+    }
+  }, [seekRequest]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

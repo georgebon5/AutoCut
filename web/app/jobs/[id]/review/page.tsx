@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import CaptionStylePicker from "@/components/caption-style-picker";
 import DownloadsPanel from "@/components/downloads-panel";
@@ -54,6 +54,11 @@ export default function ReviewPage() {
   // reflects the previous render only; we gate on this to tell the user when
   // their edits aren't visible yet.
   const [dirty, setDirty] = useState(false);
+  // Seek request: when the user clicks a segment in the Timeline, the player
+  // jumps to that segment's position in the output video.  The `seq` counter
+  // lets us re-seek to the same position on a second click.
+  const [seekRequest, setSeekRequest] = useState<{ time: number; seq: number } | undefined>();
+  const seekSeq = useRef(0);
   // Reset dirty when the user switches preset — each preset has its own EDL
   // + rendered mp4, so dirty-against-preset-A doesn't apply to preset B.
   useEffect(() => {
@@ -191,6 +196,7 @@ export default function ReviewPage() {
             cacheKey={job.updated_at}
             rendering={rendering}
             edl={edlQuery.data}
+            seekRequest={seekRequest}
           />
           <div className="glass-card flex flex-col gap-4 rounded-2xl p-4">
             <label className="flex items-center gap-3 text-sm text-white/80">
@@ -225,6 +231,10 @@ export default function ReviewPage() {
             preset={edlPreset ?? undefined}
             edl={edlQuery.data}
             onDirty={() => setDirty(true)}
+            onSeekRequest={(t) => {
+              seekSeq.current += 1;
+              setSeekRequest({ time: t, seq: seekSeq.current });
+            }}
           />
           <Transcript
             jobId={jobId}

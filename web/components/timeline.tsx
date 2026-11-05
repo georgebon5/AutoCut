@@ -19,10 +19,24 @@ interface Props {
   edl: Edl;
   /** Called after a successful toggle so the parent can flag "needs re-render". */
   onDirty?: () => void;
+  /** Called with the output-timeline position when a segment is selected,
+   *  so the preview player can seek to it without a full re-render. */
+  onSeekRequest?: (outputTime: number) => void;
 }
 
-export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
+export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
+
+  // Build a map from segment index → output_start for instant seek-to-segment.
+  const outputStartBySegment = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const chunk of edl.render_chunks) {
+      if (chunk.segment_index >= 0) {
+        m.set(chunk.segment_index, chunk.output_start);
+      }
+    }
+    return m;
+  }, [edl.render_chunks]);
 
   // Group segments by clip for row layout; preserve original EDL index so we
   // can PATCH by it later.
@@ -40,6 +54,12 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
+
+  const selectAndSeek = (index: number) => {
+    setSelected(index);
+    const t = outputStartBySegment.get(index);
+    if (t !== undefined) onSeekRequest?.(t);
+  };
 
   // Keyboard shortcuts for high-volume editing. Skip when the user is typing
   // in an input/button/link so word-edits and buttons keep their keystrokes.
@@ -64,10 +84,20 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
       // j/k navigate; d/x/Delete/Backspace toggle keep/cut of current.
       if (e.key === "j" || e.key === "J" || e.key === "ArrowLeft") {
         e.preventDefault();
-        setSelected((s) => (s === null ? 0 : Math.max(0, s - 1)));
+        setSelected((s) => {
+          const next = s === null ? 0 : Math.max(0, s - 1);
+          const ot = outputStartBySegment.get(next);
+          if (ot !== undefined) onSeekRequest?.(ot);
+          return next;
+        });
       } else if (e.key === "l" || e.key === "L" || e.key === "ArrowRight") {
         e.preventDefault();
-        setSelected((s) => (s === null ? 0 : Math.min(total - 1, s + 1)));
+        setSelected((s) => {
+          const next = s === null ? 0 : Math.min(total - 1, s + 1);
+          const ot = outputStartBySegment.get(next);
+          if (ot !== undefined) onSeekRequest?.(ot);
+          return next;
+        });
       } else if (
         e.key === "d" || e.key === "D"
         || e.key === "x" || e.key === "X"
@@ -98,7 +128,7 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
               clip={clip}
               items={bySegmentIndex.get(clip.clip_id) ?? []}
               selectedIndex={selected}
-              onSelect={setSelected}
+              onSelect={selectAndSeek}
               onToggle={(index, decision) => {
                 toggleMut.mutate({ index, decision });
                 onDirty?.();
@@ -123,8 +153,10 @@ export default function Timeline({ jobId, preset, edl, onDirty }: Props) {
       )}
 
       <p className="text-[11px] text-white/35">
-        Shortcuts: <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">J</kbd>
-        /<kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">L</kbd> προηγούμενο/επόμενο ·{" "}
+        Κλικ = επιλογή + seek ·{" "}
+        Διπλό κλικ = εναλλαγή keep/cut ·{" "}
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">J</kbd>
+        /<kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">L</kbd> πλοήγηση ·{" "}
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">D</kbd> κόψε/κράτα ·{" "}
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> play/pause
       </p>
@@ -173,12 +205,10 @@ function ClipRow({
             <button
               key={index}
               type="button"
-              onClick={() => {
-                onSelect(index);
-                onToggle(index, next);
-              }}
+              onClick={() => onSelect(index)}
+              onDoubleClick={() => onToggle(index, next)}
               style={{ left, width: w, height: ROW_HEIGHT_PX }}
-              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · ${seg.decision}`}
+              title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · ${seg.decision} · διπλό κλικ = εναλλαγή`}
               className={[
                 "absolute top-0 rounded-md border transition duration-200",
                 keep
