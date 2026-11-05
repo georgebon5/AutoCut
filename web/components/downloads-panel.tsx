@@ -30,8 +30,9 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const chapterFiles = outputs.filter((o) => o.kind === "chapters_txt");
   const fcpxmlFiles = outputs.filter((o) => o.kind === "fcpxml");
   const cmxFiles = outputs.filter((o) => o.kind === "cmx_edl");
+  const srtFiles = outputs.filter((o) => o.kind === "captions_srt");
   // Show the bundle button when there's at least one NLE file alongside the video.
-  const hasBundle = videos.length > 0 && (fcpxmlFiles.length > 0 || cmxFiles.length > 0);
+  const hasBundle = videos.length > 0 && (fcpxmlFiles.length > 0 || cmxFiles.length > 0 || srtFiles.length > 0);
 
   return (
     <section className="flex flex-col gap-3">
@@ -84,6 +85,14 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
                 file={o}
                 href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
                 label="CMX EDL"
+              />
+            ))}
+            {srtFiles.map((o) => (
+              <OutputRow
+                key={o.name}
+                file={o}
+                href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
+                label="SRT"
               />
             ))}
           </ul>

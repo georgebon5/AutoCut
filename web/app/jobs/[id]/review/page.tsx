@@ -12,7 +12,7 @@ import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
 import { ApiError, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
 import { useJobEvents } from "@/lib/use-job-events";
-import type { CaptionStyle, Job, JobConfig } from "@/lib/api.types";
+import type { CaptionStyle, Edl, Job, JobConfig } from "@/lib/api.types";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
 const PRESET_OPTIONS: JobConfig["preset"][] = ["tight", "medium", "loose"];
@@ -224,9 +224,7 @@ export default function ReviewPage() {
       ) : null}
 
       {job?.status !== "done" ? (
-        <p className="text-sm text-gray-400">
-          Περιμένουμε να τελειώσει το job για να το δεις.
-        </p>
+        <JobProgressCard job={job} />
       ) : isAll && preset === null ? (
         <p className="text-sm text-gray-400">
           Αυτό το job έβγαλε τρεις διάρκειες. Διάλεξε μία για να δεις.
@@ -302,6 +300,7 @@ export default function ReviewPage() {
               setSeekRequest({ time: t, seq: seekSeq.current });
             }}
           />
+          <DurationBar edl={edlQuery.data} />
           <Transcript
             jobId={jobId}
             preset={edlPreset ?? undefined}
@@ -384,6 +383,110 @@ function PresetPicker({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Live progress card shown while the job is running / pending
+// ---------------------------------------------------------------------------
+
+const STAGE_LABEL: Record<string, string> = {
+  created:         "Αρχικοποίηση…",
+  ingesting:       "Εισαγωγή clips…",
+  vad:             "Ανίχνευση ομιλίας…",
+  transcribing:    "Μεταγραφή…",
+  fillers:         "Εντοπισμός fillers…",
+  takes:           "Ανάλυση takes…",
+  silence_removal: "Αφαίρεση σιωπών…",
+  features:        "Ανάλυση περιεχομένου…",
+  hook:            "Εύρεση hook…",
+  semantic:        "Semantic matching…",
+  rendering:       "Δημιουργία βίντεο…",
+  captions:        "Υπότιτλοι…",
+  complete:        "Ολοκληρώθηκε",
+  error:           "Σφάλμα",
+};
+
+function JobProgressCard({ job }: { job: Job | undefined }) {
+  if (!job) {
+    return (
+      <div className="glass-card rounded-2xl p-6 text-center text-sm text-white/40">
+        Φόρτωση…
+      </div>
+    );
+  }
+
+  if (job.status === "failed") return null;   // error card is shown separately above
+
+  const pct = Math.round(job.progress * 100);
+  const stageLabel = STAGE_LABEL[job.stage] ?? job.stage;
+
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
+          <div>
+            <p className="text-sm font-medium text-white/90">{stageLabel}</p>
+            <p className="text-xs text-white/40">
+              {pct}% · {STATUS_LABEL[job.status]}
+            </p>
+          </div>
+        </div>
+        <span className="font-mono text-lg font-light text-white/50">{pct}%</span>
+      </div>
+      <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-indigo-400 to-fuchsia-400 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Duration summary bar shown above the transcript when EDL is loaded
+// ---------------------------------------------------------------------------
+
+function fmtDur(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+}
+
+function DurationBar({ edl }: { edl: Edl | undefined }) {
+  if (!edl) return null;
+
+  const totalSource = edl.clips.reduce((acc, c) => acc + c.duration, 0);
+  const kept = edl.segments
+    .filter((s) => s.decision === "keep")
+    .reduce((acc, s) => acc + (s.end - s.start), 0);
+
+  if (totalSource === 0) return null;
+
+  const pct = Math.min(100, (kept / totalSource) * 100);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="text-white/50">
+          Κρατάς{" "}
+          <span className="font-medium text-white/80">{fmtDur(kept)}</span>
+        </span>
+        <span className="text-white/35">
+          {fmtDur(totalSource)} σύνολο · {Math.round(pct)}%
+        </span>
+      </div>
+      <div className="h-1 w-full overflow-hidden rounded-full bg-white/5">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }
