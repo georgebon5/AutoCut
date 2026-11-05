@@ -209,17 +209,28 @@ export const fetchOutputText = async (jobId: string, filename: string): Promise<
 export const postRender = (
   jobId: string,
   preset?: string,
-  opts?: { burnSubtitles?: boolean; captionStyle?: CaptionStyle },
+  opts?: {
+    burnSubtitles?: boolean;
+    captionStyle?: CaptionStyle;
+    transitionType?: string;
+    colorGrading?: string;
+  },
 ) => {
   const params = new URLSearchParams();
   if (preset) params.set("preset", preset);
   if (opts?.burnSubtitles) params.set("burn_subtitles", "true");
   const q = params.toString() ? `?${params.toString()}` : "";
-  const hasStyle = opts?.captionStyle && Object.keys(opts.captionStyle).length > 0;
+  const body: Record<string, unknown> = {};
+  if (opts?.captionStyle && Object.keys(opts.captionStyle).length > 0) {
+    body.caption_style = opts.captionStyle;
+  }
+  if (opts?.transitionType) body.transition_type = opts.transitionType;
+  if (opts?.colorGrading) body.color_grading = opts.colorGrading;
+  const hasBody = Object.keys(body).length > 0;
   return request<Job>(`/jobs/${jobId}/render${q}`, {
     method: "POST",
-    headers: hasStyle ? { "content-type": "application/json" } : undefined,
-    body: hasStyle ? JSON.stringify({ caption_style: opts!.captionStyle }) : undefined,
+    headers: hasBody ? { "content-type": "application/json" } : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
 };
 

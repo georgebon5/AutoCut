@@ -71,10 +71,14 @@ def post_render(
         if body and body.caption_style
         else None
     )
+    transition_override = body.transition_type if body else None
+    color_grading_override = body.color_grading if body else None
     runner.submit(lambda: rerender_from_edl(
         job_id, workspace, edl_path, output_name, session_factory,
         burn_subtitles_flag=burn,
         caption_style=style,
+        transition_type_override=transition_override,
+        color_grading_override=color_grading_override,
     ))
 
     # Return the current (freshly re-fetched) job snapshot so the client sees

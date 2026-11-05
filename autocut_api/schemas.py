@@ -207,3 +207,7 @@ class RenderRequest(BaseModel):
     in the body.
     """
     caption_style: CaptionStyle | None = None
+    # When present these override the values stored in job.config_json,
+    # letting the user try different transitions / grades without a new job.
+    transition_type: str | None = None
+    color_grading: str | None = None

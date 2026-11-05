@@ -159,6 +159,8 @@ def rerender_from_edl(
     session_factory: sessionmaker,
     burn_subtitles_flag: bool = False,
     caption_style: dict | None = None,
+    transition_type_override: str | None = None,
+    color_grading_override: str | None = None,
 ) -> None:
     """Re-render ``output_name`` using the EDL on disk — no re-analysis.
 
@@ -222,8 +224,8 @@ def rerender_from_edl(
             mp = Path(opts["music_path"])
             if mp.exists():
                 music_path_rerender = mp
-        transition_type_rerender = str(opts.get("transition_type", "none"))
-        color_grading_rerender = str(opts.get("color_grading", "none"))
+        transition_type_rerender = transition_type_override or str(opts.get("transition_type", "none"))
+        color_grading_rerender = color_grading_override or str(opts.get("color_grading", "none"))
         from autocut.config import TransitionConfig as _TC
         render(
             proxies=edl.clips,

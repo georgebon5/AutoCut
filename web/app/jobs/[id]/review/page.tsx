@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -46,6 +47,12 @@ export default function ReviewPage() {
   );
   const [captionStyle, setCaptionStyle] = usePersistedState<CaptionStyle>(
     `autocut:${jobId}:captionStyle`, {},
+  );
+  const [transitionType, setTransitionType] = usePersistedState<string>(
+    `autocut:${jobId}:transitionType`, "none",
+  );
+  const [colorGrading, setColorGrading] = usePersistedState<string>(
+    `autocut:${jobId}:colorGrading`, "none",
   );
   // "dirty" = user toggled a segment since the last render. The preview mp4
   // reflects the previous render only; we gate on this to tell the user when
@@ -111,6 +118,8 @@ export default function ReviewPage() {
       postRender(jobId, edlPreset ?? undefined, {
         burnSubtitles: burnSubs,
         captionStyle: burnSubs ? captionStyle : undefined,
+        transitionType: transitionType !== "none" ? transitionType : undefined,
+        colorGrading: colorGrading !== "none" ? colorGrading : undefined,
       }),
     onSuccess: () => {
       setDirty(false);
@@ -289,6 +298,20 @@ export default function ReviewPage() {
                 }}
               />
             ) : null}
+            <OptionRow label="Μετάβαση">
+              <PillPicker
+                options={TRANSITION_OPTIONS}
+                value={transitionType}
+                onChange={(v) => { setTransitionType(v); setDirty(true); }}
+              />
+            </OptionRow>
+            <OptionRow label="Χρωματισμός">
+              <PillPicker
+                options={COLOR_GRADING_OPTIONS}
+                value={colorGrading}
+                onChange={(v) => { setColorGrading(v); setDirty(true); }}
+              />
+            </OptionRow>
           </div>
           <Timeline
             jobId={jobId}
@@ -387,6 +410,65 @@ function PresetPicker({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Transition / color-grading option pickers
+// ---------------------------------------------------------------------------
+
+const TRANSITION_OPTIONS: { value: string; label: string }[] = [
+  { value: "none",       label: "Hard cut" },
+  { value: "fade",       label: "Crossfade" },
+  { value: "fadeblack",  label: "Dip black" },
+  { value: "fadewhite",  label: "Dip white" },
+];
+
+const COLOR_GRADING_OPTIONS: { value: string; label: string }[] = [
+  { value: "none",       label: "Κανένας" },
+  { value: "warm",       label: "Warm" },
+  { value: "cool",       label: "Cool" },
+  { value: "cinematic",  label: "Cinematic" },
+  { value: "vibrant",    label: "Vibrant" },
+];
+
+function OptionRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <span className="w-24 shrink-0 text-xs text-white/50">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function PillPicker({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={[
+            "rounded-lg px-2.5 py-1 text-xs transition",
+            value === o.value
+              ? "bg-indigo-500/20 font-medium text-indigo-200 ring-1 ring-indigo-400/40"
+              : "text-white/50 hover:bg-white/5 hover:text-white/80",
+          ].join(" ")}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
