@@ -11,7 +11,7 @@ import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
-import { ApiError, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
+import { ApiError, getChapters, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
 import { useJobEvents } from "@/lib/use-job-events";
 import type { CaptionStyle, Edl, Job, JobConfig } from "@/lib/api.types";
 import { usePersistedState } from "@/lib/use-persisted-state";
@@ -324,6 +324,14 @@ export default function ReviewPage() {
             }}
           />
           <DurationBar edl={edlQuery.data} />
+          <ChaptersPanel
+            jobId={jobId}
+            preset={edlPreset ?? undefined}
+            onSeekRequest={(t) => {
+              seekSeq.current += 1;
+              setSeekRequest({ time: t, seq: seekSeq.current });
+            }}
+          />
           <Transcript
             jobId={jobId}
             preset={edlPreset ?? undefined}
@@ -529,6 +537,84 @@ function JobProgressCard({ job }: { job: Job | undefined }) {
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Auto-generated chapters panel: seek-to + YouTube copy
+// ---------------------------------------------------------------------------
+
+function _fmtChapterTime(seconds: number): string {
+  const s = Math.floor(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function ChaptersPanel({
+  jobId,
+  preset,
+  onSeekRequest,
+}: {
+  jobId: string;
+  preset: string | undefined;
+  onSeekRequest: (t: number) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const chaptersQ = useQuery({
+    queryKey: ["chapters", jobId, preset],
+    queryFn: () => getChapters(jobId, preset),
+    retry: false,
+  });
+
+  const data = chaptersQ.data;
+  if (!data || data.length < 2) return null;
+
+  const copyToClipboard = () => {
+    const text = data
+      .map((ch) => `${_fmtChapterTime(ch.start)} ${ch.title}`)
+      .join("\n");
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="glass-card rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/50">
+          Chapters <span className="font-normal text-white/30">({data.length})</span>
+        </p>
+        <button
+          type="button"
+          onClick={copyToClipboard}
+          className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-white/50 transition hover:border-cyan-400/40 hover:text-cyan-200"
+        >
+          {copied ? "Αντιγράφηκε ✓" : "Copy YouTube"}
+        </button>
+      </div>
+      <ul className="mt-3 flex flex-col gap-0.5">
+        {data.map((ch, i) => (
+          <li key={i}>
+            <button
+              type="button"
+              onClick={() => onSeekRequest(ch.start)}
+              className="flex w-full items-baseline gap-3 rounded-lg px-2 py-1.5 text-left transition hover:bg-white/[0.04]"
+            >
+              <span className="w-10 shrink-0 font-mono text-xs text-white/35">
+                {_fmtChapterTime(ch.start)}
+              </span>
+              <span className="truncate text-sm text-white/70">{ch.title}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

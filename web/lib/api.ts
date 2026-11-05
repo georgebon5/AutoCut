@@ -202,6 +202,14 @@ export const fetchOutputText = async (jobId: string, filename: string): Promise<
   return res.text();
 };
 
+/** Fetch auto-generated chapters as structured JSON. Returns [] if no chapters file exists. */
+export const getChapters = (jobId: string, preset?: string) => {
+  const filename = preset ? `chapters_${preset}.json` : "chapters.json";
+  return request<{ start: number; end: number; title: string }[]>(
+    `/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`,
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Re-render (cached — no re-analysis)
 // ---------------------------------------------------------------------------

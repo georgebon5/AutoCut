@@ -31,6 +31,7 @@ type Filter = "all" | "keep" | "cut";
 export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [showHelp, setShowHelp] = useState(false);
 
   // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
   // replay it. Using a ref avoids stale-closure issues in event handlers;
@@ -161,6 +162,11 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         pushUndo(selected, seg.decision as Decision);
         toggleMut.mutate({ index: selected, decision: next });
         onDirty?.();
+      } else if (e.key === "?" || e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+      } else if (e.key === "Escape") {
+        setShowHelp(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -237,15 +243,20 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         </p>
       )}
 
-      <p className="text-[11px] text-white/35">
-        Κλικ = επιλογή + seek ·{" "}
-        Διπλό κλικ = εναλλαγή keep/cut ·{" "}
-        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">J</kbd>
-        /<kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">L</kbd> πλοήγηση ·{" "}
-        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">D</kbd> κόψε/κράτα ·{" "}
-        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Z</kbd> undo ·{" "}
-        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> play/pause
-      </p>
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={() => setShowHelp((v) => !v)}
+          title="Keyboard shortcuts (H / ?)"
+          className="rounded-lg border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-xs text-white/35 transition hover:border-white/20 hover:text-white/60"
+        >
+          ?
+        </button>
+      </div>
+
+      {showHelp ? (
+        <ShortcutHelp onClose={() => setShowHelp(false)} />
+      ) : null}
     </section>
   );
 }
@@ -688,6 +699,70 @@ function StatsBar({
         {stats.keepSec.toFixed(1)}s από {totalSec.toFixed(1)}s ({pct}%)
       </span>
       <span className="text-white/35">· {total} κομμάτια σύνολο</span>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcut help overlay
+// ---------------------------------------------------------------------------
+
+type ShortcutRow = { keys: string[]; desc: string };
+
+const SHORTCUTS: ShortcutRow[] = [
+  { keys: ["J", "←"],        desc: "Προηγούμενο segment" },
+  { keys: ["L", "→"],        desc: "Επόμενο segment" },
+  { keys: ["D", "X"],        desc: "Εναλλαγή keep / cut" },
+  { keys: ["Ctrl+Z"],        desc: "Undo τελευταίας αλλαγής" },
+  { keys: ["Space"],         desc: "Play / Pause" },
+  { keys: ["←", "→"],       desc: "Seek ±5s (στο player)" },
+  { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
+  { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },
+  { keys: ["Esc"],           desc: "Κλείσιμο" },
+];
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+      className="glass-card rounded-2xl p-5"
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/50">
+          Keyboard shortcuts
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md px-2 py-0.5 text-xs text-white/40 transition hover:text-white/80"
+        >
+          ✕
+        </button>
+      </div>
+      <table className="w-full text-sm">
+        <tbody>
+          {SHORTCUTS.map((row, i) => (
+            <tr key={i} className="border-t border-white/5">
+              <td className="py-1.5 pr-4">
+                <span className="flex flex-wrap gap-1">
+                  {row.keys.map((k) => (
+                    <kbd
+                      key={k}
+                      className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-white/60"
+                    >
+                      {k}
+                    </kbd>
+                  ))}
+                </span>
+              </td>
+              <td className="py-1.5 text-white/55">{row.desc}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
