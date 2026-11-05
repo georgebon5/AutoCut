@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from autocut.captions import write_cut_captions
 from autocut.config import AutoCutConfig
 from autocut.edl import EDL, save_edl
+from autocut.thumbnail import extract_thumbnail
 from autocut.features import enrich_segments
 from autocut.fillers import detect_fillers, punch_out_fillers
 from autocut.hook import find_hook_segment
@@ -444,6 +445,14 @@ def run_pipeline(
         edls.append(edl_path)
         rep.info(f"wrote {edl_path.name}")
 
+        # Thumbnail: best-interest frame from the rendered mp4. Named after
+        # the stem (thumbnail.jpg / thumbnail_tight.jpg / …) so multi-preset
+        # jobs produce one per cut rather than overwriting each other.
+        thumb_stem = stem.removeprefix("rough_cut") or ""
+        thumb_name = f"thumbnail{thumb_stem}.jpg"
+        if extract_thumbnail(out_mp4, edl, output_dir / thumb_name):
+            rep.info(f"wrote {thumb_name}")
+
         # Cut-aligned captions: timestamps match the mp4 we just produced,
         # so the user can burn them in or import into an NLE without drift.
         if do_captions and any(t.words for t in all_transcripts.values()):
@@ -726,6 +735,9 @@ def _run_voiceover_pipeline(
     edl_path = output_dir / "edl.json"
     save_edl(edl, edl_path)
     rep.info(f"wrote {edl_path.name}")
+
+    if extract_thumbnail(out_mp4, edl, output_dir / "thumbnail.jpg"):
+        rep.info("wrote thumbnail.jpg")
 
     return PipelineResult(
         proxies=proxies,

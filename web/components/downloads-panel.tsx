@@ -23,23 +23,29 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   // TikTok workflow: user just needs the rendered mp4. The other artifacts
   // (EDL JSON, standalone SRT/ASS, FCPXML) are still produced server-side —
   // they're useful for NLE workflows and debugging — but hidden from this UI.
-  const videos = (outputsQ.data?.outputs ?? []).filter((o) => o.kind === "video");
+  const outputs = outputsQ.data?.outputs ?? [];
+  const videos = outputs.filter((o) => o.kind === “video”);
+  const thumbnails = outputs.filter((o) => o.kind === “thumbnail”);
 
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+    <section className=”flex flex-col gap-3”>
+      <h2 className=”text-xs font-medium uppercase tracking-[0.2em] text-white/40”>
         Κατέβασμα βίντεο
       </h2>
 
-      <div className="glass-card rounded-2xl p-4">
+      {thumbnails.length > 0 && (
+        <ThumbnailStrip jobId={jobId} thumbnails={thumbnails} cacheKey={cacheKey} />
+      )}
+
+      <div className=”glass-card rounded-2xl p-4”>
         {outputsQ.isLoading ? (
-          <p className="text-sm text-white/40">Φόρτωση…</p>
+          <p className=”text-sm text-white/40”>Φόρτωση…</p>
         ) : videos.length === 0 ? (
-          <p className="text-sm text-white/40">
+          <p className=”text-sm text-white/40”>
             Δεν έχει βγει τίποτα ακόμα. Πάτα “Ξαναφτιάξε βίντεο” πιο πάνω.
           </p>
         ) : (
-          <ul className="flex flex-col gap-1.5">
+          <ul className=”flex flex-col gap-1.5”>
             {videos.map((o) => (
               <OutputRow
                 key={o.name}
@@ -51,6 +57,44 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
         )}
       </div>
     </section>
+  );
+}
+
+
+function ThumbnailStrip({
+  jobId,
+  thumbnails,
+  cacheKey,
+}: {
+  jobId: string;
+  thumbnails: OutputFile[];
+  cacheKey: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {thumbnails.map((t) => {
+        const src = `${outputDownloadUrl(jobId, t.name)}?v=${encodeURIComponent(cacheKey)}`;
+        return (
+          <a
+            key={t.name}
+            href={src}
+            download={t.name}
+            title={t.name}
+            className="group relative overflow-hidden rounded-xl border border-white/10 transition hover:border-cyan-400/40"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt={t.name}
+              className="h-24 w-auto object-cover"
+            />
+            <span className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1 text-[10px] text-white/60 opacity-0 transition group-hover:opacity-100">
+              {t.name}
+            </span>
+          </a>
+        );
+      })}
+    </div>
   );
 }
 

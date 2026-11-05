@@ -25,6 +25,7 @@ _OUTPUT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("edl*.json", "edl"),
     ("*.srt", "captions_srt"),
     ("*.ass", "captions_ass"),
+    ("thumbnail*.jpg", "thumbnail"),
 )
 
 _MEDIA_TYPES = {
@@ -32,6 +33,7 @@ _MEDIA_TYPES = {
     "edl": "application/json",
     "captions_srt": "application/x-subrip",
     "captions_ass": "text/plain; charset=utf-8",
+    "thumbnail": "image/jpeg",
 }
 
 
