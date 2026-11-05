@@ -19,6 +19,8 @@ interface Props {
   onDirty?: () => void;
   /** Output-timeline position from the video player — drives live word highlight. */
   currentTime?: number;
+  /** Called with an output-timeline position when the user clicks a word. */
+  onSeekRequest?: (outputTime: number) => void;
 }
 
 /** Carries the original word position in `transcript.words` for PATCH targeting. */
@@ -27,6 +29,19 @@ interface WordAssignment {
   word: WordTimestamp;
   wordIndex: number;
   clipId: string;
+}
+
+/** Map a source position (clipId + sourceTime) forward to an output-timeline position. */
+function sourceToOutput(clipId: string, sourceTime: number, edl: Edl): number | null {
+  for (const chunk of edl.render_chunks) {
+    if (chunk.segment_index < 0) continue;
+    const seg = edl.segments[chunk.segment_index];
+    if (!seg || seg.clip_id !== clipId) continue;
+    if (sourceTime >= seg.start && sourceTime < seg.end) {
+      return chunk.output_start + (sourceTime - seg.start);
+    }
+  }
+  return null;
 }
 
 /** Map an output-timeline position back to { clipId, sourceTime } via render_chunks. */
@@ -82,7 +97,7 @@ function findContainingSegment(
 
 type Mode = "toggle" | "edit";
 
-export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty, currentTime }: Props) {
+export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty, currentTime, onSeekRequest }: Props) {
   const toggleMut = useSegmentToggle(jobId, preset);
   const editMut = useWordEdit(jobId, preset);
   const [mode, setMode] = useState<Mode>("toggle");
@@ -162,6 +177,10 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             onStartEdit={(clipId, wordIndex) => setEditing({ clipId, wordIndex })}
             onCommitEdit={commitEdit}
             onCancelEdit={() => setEditing(null)}
+            onSeekToWord={(clipId, sourceTime) => {
+              const ot = sourceToOutput(clipId, sourceTime, edl);
+              if (ot !== null) onSeekRequest?.(ot);
+            }}
             onSelect={(i) => {
               onSelect?.(i);
               const seg = edl.segments[i];
@@ -233,6 +252,7 @@ function ClipTranscript({
   onStartEdit,
   onCommitEdit,
   onCancelEdit,
+  onSeekToWord,
   onSelect,
 }: {
   transcript: TranscriptT;
@@ -245,6 +265,7 @@ function ClipTranscript({
   onStartEdit: (clipId: string, wordIndex: number) => void;
   onCommitEdit: (clipId: string, wordIndex: number, next: string) => void;
   onCancelEdit: () => void;
+  onSeekToWord: (clipId: string, sourceTime: number) => void;
   onSelect: (segIndex: number) => void;
 }) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -290,6 +311,7 @@ function ClipTranscript({
                 if (mode === "edit") {
                   onStartEdit(a.clipId, a.wordIndex);
                 } else {
+                  onSeekToWord(a.clipId, a.word.start);
                   onSelect(a.segIndex);
                 }
               }}

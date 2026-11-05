@@ -307,6 +307,10 @@ export default function ReviewPage() {
             edl={edlQuery.data}
             onDirty={() => setDirty(true)}
             currentTime={currentTime}
+            onSeekRequest={(t) => {
+              seekSeq.current += 1;
+              setSeekRequest({ time: t, seq: seekSeq.current });
+            }}
           />
           <DownloadsPanel
             jobId={jobId}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { listOutputs, outputDownloadUrl } from "@/lib/api";
 import type { Edl, OutputFile, RenderChunk } from "@/lib/api.types";
@@ -127,6 +127,8 @@ function PlayerSkeleton({ label }: { label: string }) {
  * the page. We skip the shortcut when an input/textarea/contenteditable has
  * focus so transcript-word edits still accept a literal space.
  */
+const SPEED_STEPS = [0.5, 1, 1.5, 2] as const;
+
 function VideoWithSpaceToggle({
   src,
   rendering,
@@ -141,6 +143,13 @@ function VideoWithSpaceToggle({
   onPlaybackTime?: (t: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [speed, setSpeed] = useState<number>(1);
+  // Apply speed changes to the video element.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) v.playbackRate = speed;
+  }, [speed]);
+
   // Keep the latest cutChunks in a ref so the timeupdate handler always sees
   // the current set — attaching a new listener on every change would churn.
   const cutRef = useRef<RenderChunk[]>(cutChunks);
@@ -210,17 +219,38 @@ function VideoWithSpaceToggle({
   };
 
   return (
-    <video
-      ref={videoRef}
-      key={src}            /* force reload on cache-key change */
-      controls
-      playsInline
-      preload="metadata"
-      onTimeUpdate={onTimeUpdate}
-      className={`w-full bg-black transition duration-300 ${
-        rendering ? "opacity-30 blur-sm" : ""
-      }`}
-      src={src}
-    />
+    <>
+      <video
+        ref={videoRef}
+        key={src}            /* force reload on cache-key change */
+        controls
+        playsInline
+        preload="metadata"
+        onTimeUpdate={onTimeUpdate}
+        className={`w-full bg-black transition duration-300 ${
+          rendering ? "opacity-30 blur-sm" : ""
+        }`}
+        src={src}
+      />
+      {/* Playback speed bar */}
+      <div className="flex items-center gap-1 px-1 pb-1 pt-0.5">
+        <span className="mr-1 text-[10px] text-white/35">Ταχύτητα</span>
+        {SPEED_STEPS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSpeed(s)}
+            className={[
+              "rounded px-2 py-0.5 text-[11px] font-medium transition",
+              speed === s
+                ? "bg-cyan-400/20 text-cyan-200 ring-1 ring-cyan-400/40"
+                : "text-white/40 hover:bg-white/5 hover:text-white/70",
+            ].join(" ")}
+          >
+            {s}×
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
