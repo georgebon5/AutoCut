@@ -109,7 +109,7 @@ def stub_render(monkeypatch):
     def _fake_render(proxies, segments, output_dir, cfg, output_name="rough_cut.mp4",
                      hook=None, zoom=None, fast_preview=False, subtitles_path=None,
                      audio_enhance=False, audio_denoise=False, output_aspect="source",
-                     music_path=None, music_cfg=None):
+                     music_path=None, music_cfg=None, transition_cfg=None):
         calls.append({
             "proxies": proxies, "segments": list(segments),
             "output_dir": output_dir, "output_name": output_name,

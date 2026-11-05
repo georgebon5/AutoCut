@@ -181,12 +181,26 @@ class PresetConfig(BaseModel):
     tolerance: float = 0.10
 
 
+class TransitionConfig(BaseModel):
+    """Video transition between cuts (uses ffmpeg xfade filter).
+
+    type: one of "none" (hard cut), "fade" (cross-dissolve), "fadeblack",
+          "fadewhite".  When type == "none", xfade is skipped entirely and
+          the existing concat path runs — no quality or speed penalty.
+    duration_ms: overlap in milliseconds.  Both video xfade AND audio
+          acrossfade use this value so A/V stay perfectly in sync.
+    """
+    type: str = "none"
+    duration_ms: int = 300
+
+
 class AutoCutConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     vad: VADConfig = Field(default_factory=VADConfig)
     silence: SilenceConfig = Field(default_factory=SilenceConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
     music: MusicConfig = Field(default_factory=MusicConfig)
+    transition: TransitionConfig = Field(default_factory=TransitionConfig)
     transcribe: TranscribeConfig = Field(default_factory=TranscribeConfig)
     fillers: FillerConfig = Field(default_factory=FillerConfig)
     takes: TakesConfig = Field(default_factory=TakesConfig)

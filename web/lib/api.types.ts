@@ -26,6 +26,8 @@ export interface JobConfig {
   voiceover_mode?: boolean;
   // Background music: present when a music track was uploaded.
   music_path?: string;
+  // Visual transition between cuts.
+  transition_type?: TransitionType;
 }
 
 export interface Job {
@@ -40,6 +42,8 @@ export interface Job {
   updated_at: string;
 }
 
+export type TransitionType = "none" | "fade" | "fadeblack" | "fadewhite";
+
 export interface JobCreateRequest {
   upload_ids: string[];
   preset?: "none" | "tight" | "medium" | "loose" | "all";
@@ -52,6 +56,7 @@ export interface JobCreateRequest {
   output_aspect?: "source" | "9:16" | "16:9";
   semantic_match?: boolean;
   music_upload_id?: string;
+  transition?: TransitionType;
 }
 
 export interface Upload {

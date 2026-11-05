@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
-from autocut.config import AutoCutConfig
+from autocut.config import AutoCutConfig, TransitionConfig
 from autocut.edl import EDL, save_edl
 from autocut.thumbnail import extract_thumbnail
 from autocut.features import enrich_segments
@@ -86,6 +86,10 @@ class PipelineOptions:
     # the speaker talks and returns to full volume in silent moments. Works in
     # both normal mode and voiceover-vlog mode.
     music_path: Path | None = None
+    # Visual transition between cuts.  "none" = hard cut (default).
+    # "fade" = cross-dissolve, "fadeblack" = dip to black, "fadewhite" = dip
+    # to white.  Duration is taken from cfg.transition.duration_ms.
+    transition_type: str = "none"
 
 
 @dataclass
@@ -429,6 +433,10 @@ def run_pipeline(
                 output_aspect=options.output_aspect,
                 music_path=options.music_path,
                 music_cfg=cfg.music,
+                transition_cfg=TransitionConfig(
+                    type=options.transition_type,
+                    duration_ms=cfg.transition.duration_ms,
+                ) if options.transition_type not in ("none", "") else None,
             )
         except RenderError as e:
             raise PipelineError(f"render failed: {e}") from e

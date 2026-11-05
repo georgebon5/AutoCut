@@ -210,6 +210,8 @@ def rerender_from_edl(
             mp = Path(opts["music_path"])
             if mp.exists():
                 music_path_rerender = mp
+        transition_type_rerender = str(opts.get("transition_type", "none"))
+        from autocut.config import TransitionConfig as _TC
         render(
             proxies=edl.clips,
             segments=edl.segments,
@@ -225,6 +227,10 @@ def rerender_from_edl(
             output_aspect=str(opts.get("output_aspect", "source")),
             music_path=music_path_rerender,
             music_cfg=cfg.music,
+            transition_cfg=_TC(
+                type=transition_type_rerender,
+                duration_ms=cfg.transition.duration_ms,
+            ) if transition_type_rerender not in ("none", "") else None,
         )
         # Persist the recomputed chunk map so the next EDL fetch carries it.
         save_edl(edl, edl_path)

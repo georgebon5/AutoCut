@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from autocut.config import MusicConfig, RenderConfig, ZoomConfig
+from autocut.config import MusicConfig, RenderConfig, TransitionConfig, ZoomConfig
 from autocut.models import ProxyInfo, Segment
 
 
@@ -194,6 +194,39 @@ def _music_duck_filters(
     return f, out_label
 
 
+_VALID_XFADE = frozenset({"fade", "fadeblack", "fadewhite", "wipeleft", "wiperight"})
+
+
+def _video_xfade_chain(
+    N: int,
+    durations: list[float],
+    transition: str,
+    td: float,
+) -> tuple[list[str], str]:
+    """Build chained xfade filters for N per-segment video streams [v0]..[v{N-1}].
+
+    Returns (filter_strings, output_label).
+    td: transition overlap in seconds — must be < every segment's duration.
+
+    xfade offset semantics: how many seconds into the *current accumulated
+    output* to start the transition.  Each iteration adds the next segment's
+    duration minus one overlap, so the offsets shift accordingly.
+    """
+    filters: list[str] = []
+    current = "[v0]"
+    cumulative = durations[0]
+    for i in range(1, N):
+        label = f"[vx{i}]" if i < N - 1 else "[vxout]"
+        offset = max(0.0, cumulative - td)
+        filters.append(
+            f"{current}[v{i}]xfade=transition={transition}"
+            f":duration={td:.4f}:offset={offset:.4f}{label}"
+        )
+        current = label
+        cumulative += durations[i] - td
+    return filters, current
+
+
 def _build_render_cmd(
     kept: list[_RenderSegment],
     output_path: Path,
@@ -205,6 +238,7 @@ def _build_render_cmd(
     output_aspect: str = "source",
     music_path: Path | None = None,
     music_cfg: MusicConfig | None = None,
+    transition_cfg: TransitionConfig | None = None,
 ) -> list[str]:
     """Build the complete FFmpeg command for rendering kept segments.
 
@@ -220,7 +254,22 @@ def _build_render_cmd(
     - B-roll (no audio): silent aevalsrc of matching duration
     """
     N = len(kept)
-    cf_s = cfg.audio_crossfade_ms / 1000.0
+    # Resolve effective crossfade duration.  When a visual transition is
+    # requested, both audio acrossfade AND video xfade use the same duration so
+    # A/V stay frame-accurate.  Clamp to 40% of the shortest segment so we
+    # never ask ffmpeg to dissolve more than a clip contains.
+    use_xfade = (
+        transition_cfg is not None
+        and transition_cfg.type not in ("none", "")
+        and transition_cfg.type in _VALID_XFADE
+        and N > 1
+    )
+    if use_xfade:
+        min_dur = min(rs.duration for rs in kept)
+        td = min(transition_cfg.duration_ms / 1000.0, min_dur * 0.4)  # type: ignore[union-attr]
+        cf_s = td
+    else:
+        cf_s = cfg.audio_crossfade_ms / 1000.0
 
     cmd: list[str] = ["ffmpeg", "-y"]
     video_idx: list[int] = []   # ffmpeg input index for video of segment i
@@ -297,9 +346,20 @@ def _build_render_cmd(
         video_pre_subs = "[v0]"
         audio_out = "[a0]"
     else:
-        video_in = "".join(f"[v{i}]" for i in range(N))
-        filters.append(f"{video_in}concat=n={N}:v=1:a=0[vconcat]")
-        video_pre_subs = "[vconcat]"
+        if use_xfade:
+            # Visual cross-dissolve: chain xfade filters instead of concat.
+            # Pre-input -t already limits each input to its segment duration,
+            # which is exactly what xfade expects (it overlaps the last `td`
+            # seconds of one clip with the first `td` seconds of the next).
+            xf_filters, video_pre_subs = _video_xfade_chain(
+                N, [rs.duration for rs in kept],
+                transition_cfg.type, td,  # type: ignore[union-attr]
+            )
+            filters.extend(xf_filters)
+        else:
+            video_in = "".join(f"[v{i}]" for i in range(N))
+            filters.append(f"{video_in}concat=n={N}:v=1:a=0[vconcat]")
+            video_pre_subs = "[vconcat]"
 
         if fast_preview:
             # Hard-cut audio: concat all tracks with no crossfade. The
@@ -702,6 +762,7 @@ def render(
     output_aspect: str = "source",
     music_path: Path | None = None,
     music_cfg: MusicConfig | None = None,
+    transition_cfg: TransitionConfig | None = None,
 ) -> Path:
     """Concatenate kept segments across all proxy clips into a single video.
 
@@ -803,6 +864,7 @@ def render(
         output_aspect=output_aspect,
         music_path=music_path,
         music_cfg=music_cfg,
+        transition_cfg=transition_cfg,
     )
     _run(cmd, cwd=cwd)
     return output_path

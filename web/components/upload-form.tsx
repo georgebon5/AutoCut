@@ -52,6 +52,7 @@ export default function UploadForm() {
   const [audioDenoise, setAudioDenoise] = useState(false);
   const [outputAspect, setOutputAspect] = useState<"source" | "9:16" | "16:9">("source");
   const [semanticMatch, setSemanticMatch] = useState(false);
+  const [transition, setTransition] = useState<"none" | "fade" | "fadeblack" | "fadewhite">("none");
 
   // Reorder by file identity, not index, so an in-flight upload tracked by
   // `addFiles` keeps writing to the right slot after a reorder.
@@ -169,6 +170,7 @@ export default function UploadForm() {
         semantic_match: voiceoverMode && semanticMatch,
         music_upload_id:
           music?.state === "complete" && music.uploadId ? music.uploadId : undefined,
+        transition: transition !== "none" ? transition : undefined,
       });
       router.push("/");
     } catch (e) {
@@ -363,6 +365,24 @@ export default function UploadForm() {
           checked={audioDenoise}
           onChange={setAudioDenoise}
         />
+
+        {/* Transitions */}
+        <div className="flex flex-col gap-2 border-t border-white/8 pt-3">
+          <p className="text-xs text-white/50">
+            Transitions{" "}
+            <span className="text-white/30">(μεταβάσεις μεταξύ κοπών)</span>
+          </p>
+          <select
+            value={transition}
+            onChange={(e) => setTransition(e.target.value as typeof transition)}
+            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm transition focus:border-cyan-400/50 focus:outline-none"
+          >
+            <option value="none">Καθόλου (hard cut)</option>
+            <option value="fade">Cross-dissolve (fade)</option>
+            <option value="fadeblack">Dip to black</option>
+            <option value="fadewhite">Dip to white</option>
+          </select>
+        </div>
 
         {/* Background music */}
         <div className="flex flex-col gap-2 border-t border-white/8 pt-3">

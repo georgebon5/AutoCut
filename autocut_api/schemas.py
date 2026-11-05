@@ -57,6 +57,10 @@ class JobCreateRequest(BaseModel):
     # Optional background music: upload_id of an audio file (mp3/wav/m4a).
     # When set, the track is mixed under the voice with sidechain ducking.
     music_upload_id: str | None = None
+    # Visual transition between cuts.  "none" = hard cut (default).
+    # "fade" = cross-dissolve, "fadeblack" = dip to black, "fadewhite" = dip
+    # to white.
+    transition: str | None = None
 
 
 class CreateUploadRequest(BaseModel):

@@ -36,6 +36,7 @@ _API_OPTION_KEYS = (
     "preset", "hook", "pacing", "zoom",
     "audio_enhance", "audio_denoise", "output_aspect",
     "semantic_match",
+    "transition_type",
     # music_path is a Path, handled specially in _options_to_json like voiceover_audio_path.
 )
 
@@ -50,6 +51,7 @@ def _options_from_request(body: JobCreateRequest) -> PipelineOptions:
         audio_denoise=body.audio_denoise,
         output_aspect=body.output_aspect,
         semantic_match=body.semantic_match,
+        transition_type=body.transition or "none",
     )
 
 
