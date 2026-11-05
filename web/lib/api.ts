@@ -13,6 +13,7 @@ import type {
   HealthResponse,
   Job,
   JobCreateRequest,
+  MergeResponse,
   OutputsListResponse,
   OverridesListResponse,
   SegmentResponse,
@@ -167,6 +168,17 @@ export const splitSegment = (
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ at }),
+  });
+};
+
+export const mergeSegments = (
+  jobId: string,
+  index: number,
+  preset?: string,
+) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return request<MergeResponse>(`/jobs/${jobId}/segments/${index}/merge${q}`, {
+    method: "POST",
   });
 };
 

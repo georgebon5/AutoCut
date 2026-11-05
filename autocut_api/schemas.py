@@ -208,6 +208,11 @@ class CaptionStyle(BaseModel):
     position: str | None = None         # "top" | "middle" | "bottom"
 
 
+class MergeResponse(BaseModel):
+    """Single segment produced by merging two adjacent segments."""
+    merged: SegmentResponse
+
+
 class SplitRequest(BaseModel):
     """POST body for splitting a segment into two halves at a source timestamp."""
     at: float   # seconds within the clip

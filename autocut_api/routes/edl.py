@@ -22,6 +22,7 @@ from autocut_api.dependencies import get_db
 from autocut_api.models import Job, SegmentOverride
 from autocut_api.schemas import (
     BatchSegmentUpdate,
+    MergeResponse,
     SegmentResponse,
     SegmentUpdate,
     SplitRequest,
@@ -290,6 +291,91 @@ def split_segment(
             interest_score=second.interest_score,
             reasons=second.reasons,
             features=second.features,
+        ),
+    )
+
+
+@router.post("/{job_id}/segments/{index}/merge", response_model=MergeResponse)
+def merge_segments(
+    job_id: str,
+    index: int,
+    preset: str | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> MergeResponse:
+    """Merge segment ``index`` with segment ``index+1`` into one segment.
+
+    Both must belong to the same clip. The merged segment spans the full
+    combined time range. Decision is "keep" if either half was "keep";
+    score and features are duration-weighted averages. All indices after
+    ``index+1`` shift down by 1 — the client must refetch the EDL.
+    """
+    job = get_done_job(session, job_id)
+    _, path = resolve_edl(job, preset)
+    edl = load_edl(path)
+
+    if index < 0 or index + 1 >= len(edl.segments):
+        raise HTTPException(
+            status_code=400,
+            detail=f"cannot merge: need indices {index} and {index + 1}, "
+                   f"EDL has {len(edl.segments)} segments",
+        )
+
+    s1 = edl.segments[index]
+    s2 = edl.segments[index + 1]
+
+    if s1.clip_id != s2.clip_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cannot merge segments from different clips "
+                   f"({s1.clip_id!r} vs {s2.clip_id!r})",
+        )
+
+    d1 = s1.end - s1.start
+    d2 = s2.end - s2.start
+    total = d1 + d2 or 1.0  # guard against zero-length degenerate segments
+
+    merged_decision = "keep" if s1.decision == "keep" or s2.decision == "keep" else "cut"
+    merged_source = "user" if s1.decision_source == "user" or s2.decision_source == "user" else "auto"
+    merged_score = (s1.interest_score * d1 + s2.interest_score * d2) / total
+    all_keys = set(s1.features) | set(s2.features)
+    merged_features = {
+        k: (s1.features.get(k, 0.0) * d1 + s2.features.get(k, 0.0) * d2) / total
+        for k in all_keys
+    }
+    seen: set[str] = set()
+    merged_reasons: list[str] = []
+    for r in s1.reasons + s2.reasons:
+        if r not in seen:
+            seen.add(r)
+            merged_reasons.append(r)
+    merged_reasons.append("merged")
+
+    merged = _Segment(
+        clip_id=s1.clip_id,
+        start=s1.start,
+        end=s2.end,
+        features=merged_features,
+        interest_score=merged_score,
+        decision=merged_decision,   # type: ignore[arg-type]
+        decision_source=merged_source,  # type: ignore[arg-type]
+        reasons=merged_reasons,
+    )
+
+    edl.segments = edl.segments[:index] + [merged] + edl.segments[index + 2:]
+    save_edl(edl, path)
+
+    return MergeResponse(
+        merged=SegmentResponse(
+            index=index,
+            clip_id=merged.clip_id,
+            start=merged.start,
+            end=merged.end,
+            duration=merged.duration,
+            decision=merged.decision,
+            decision_source=merged.decision_source,
+            interest_score=merged.interest_score,
+            reasons=merged.reasons,
+            features=merged.features,
         ),
     )
 

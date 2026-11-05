@@ -388,6 +388,75 @@ def test_split_out_of_range_returns_400(app_client):
 
 
 # ---------------------------------------------------------------------------
+# Merge segments
+# ---------------------------------------------------------------------------
+
+def test_merge_combines_two_segments(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    r = client.post(f"/jobs/{jid}/segments/0/merge")
+    assert r.status_code == 200
+    body = r.json()["merged"]
+    assert abs(body["start"] - 0.0) < 1e-6
+    assert abs(body["end"] - 2.0) < 1e-6   # was 0–1 and 1–2
+    assert body["index"] == 0
+
+
+def test_merge_reduces_segment_count(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    client.post(f"/jobs/{jid}/segments/1/merge")
+    edl = client.get(f"/jobs/{jid}/edl").json()
+    assert len(edl["segments"]) == 2
+
+
+def test_merge_keep_wins_over_cut(app_client):
+    """Merging a keep with a cut yields keep."""
+    from autocut.edl import save_edl
+    from autocut.models import EDL, Segment
+    app, client, tmp = app_client
+    ws = app.state.config.jobs_dir / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    s0 = Segment(clip_id="c", start=0.0, end=1.0, decision="keep")
+    s0.interest_score = 0.8
+    s1 = Segment(clip_id="c", start=1.0, end=2.0, decision="cut")
+    s1.interest_score = 0.2
+    proxy = _make_proxy()
+    edl_obj = EDL(clips=[proxy], segments=[s0, s1])
+    save_edl(edl_obj, ws / "edl.json")
+    import json
+    with app.state.session_factory() as session:
+        from autocut_api.models import Job
+        job = Job(
+            status="done", stage="complete", progress=1.0,
+            workspace=str(ws),
+            config_json=json.dumps({"preset": "none", "hook": False, "pacing": False, "zoom": False}),
+        )
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        jid = job.id
+    r = client.post(f"/jobs/{jid}/segments/0/merge")
+    assert r.status_code == 200
+    assert r.json()["merged"]["decision"] == "keep"
+    assert any("merged" in reason for reason in r.json()["merged"]["reasons"])
+
+
+def test_merge_last_index_returns_400(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.post(f"/jobs/{jid}/segments/1/merge")   # no segment 2
+    assert r.status_code == 400
+
+
+def test_merge_out_of_range_returns_400(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.post(f"/jobs/{jid}/segments/9/merge")
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # OpenAPI
 # ---------------------------------------------------------------------------
 
@@ -397,3 +466,4 @@ def test_openapi_includes_edl_routes(app_client):
     assert "/jobs/{job_id}/edl" in schema["paths"]
     assert "/jobs/{job_id}/segments/{index}" in schema["paths"]
     assert "/jobs/{job_id}/segments/{index}/split" in schema["paths"]
+    assert "/jobs/{job_id}/segments/{index}/merge" in schema["paths"]

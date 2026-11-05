@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ApiError, getWaveform } from "@/lib/api";
 import { useBatchToggle } from "@/lib/use-batch-toggle";
+import { useMergeSegment } from "@/lib/use-merge-segment";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import { useSplitSegment } from "@/lib/use-split-segment";
 import { useTrimSegment } from "@/lib/use-trim-segment";
@@ -98,6 +99,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const batchMut = useBatchToggle(jobId, preset);
   const trimMut = useTrimSegment(jobId, preset);
   const splitMut = useSplitSegment(jobId, preset);
+  const mergeMut = useMergeSegment(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
@@ -248,6 +250,14 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         e.preventDefault();
         const sourceTime = activeCursor.sourceX / pxPerSec;
         splitMut.mutate({ index: selected, at: sourceTime });
+      } else if (e.key === "m" || e.key === "M") {
+        // Merge selected segment with the next one in the same clip.
+        if (selected === null) return;
+        const seg = edl.segments[selected];
+        const next = edl.segments[selected + 1];
+        if (!seg || !next || seg.clip_id !== next.clip_id) return;
+        e.preventDefault();
+        mergeMut.mutate({ index: selected });
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         setAutoFollow((v) => !v);
@@ -260,7 +270,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, onDirty, handleUndo, pushUndo]);
+  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, pushUndo]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -348,6 +358,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                 onDirty?.();
               }}
               onSplit={(index, at) => splitMut.mutate({ index, at })}
+              onMerge={(index) => mergeMut.mutate({ index })}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
                 if (seg) pushUndo(index, seg.decision as Decision);
@@ -489,6 +500,7 @@ function ClipRow({
   onWaveformClick,
   onTrim,
   onSplit,
+  onMerge,
   onToggle,
 }: {
   jobId: string;
@@ -501,6 +513,7 @@ function ClipRow({
   onWaveformClick: (sourceTime: number) => void;
   onTrim: (index: number, start: number | undefined, end: number | undefined) => void;
   onSplit: (index: number, at: number) => void;
+  onMerge: (index: number) => void;
   onToggle: (index: number, next: Decision) => void;
 }) {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
@@ -673,6 +686,33 @@ function ClipRow({
                   />
                 </>
               ) : null}
+            </button>
+          );
+        })}
+        {/* Merge buttons — appear between two adjacent segments when either is selected */}
+        {items.map(({ seg, index }, pos) => {
+          const nextItem = items[pos + 1];
+          if (!nextItem) return null;
+          const isAdjacentSelected =
+            selectedIndex === index || selectedIndex === nextItem.index;
+          if (!isAdjacentSelected) return null;
+          // Position the button at the shared boundary.
+          const boundaryX = Math.round(seg.end * pxPerSec);
+          return (
+            <button
+              key={`merge-${index}`}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onMerge(index); }}
+              title={`Συγχώνευση #${index} + #${nextItem.index} (M)`}
+              style={{
+                left: boundaryX - 10,
+                top: ROW_HEIGHT_PX / 2 - 10,
+                width: 20,
+                height: 20,
+              }}
+              className="absolute z-30 flex items-center justify-center rounded-full border border-indigo-400/60 bg-indigo-500/30 text-[9px] text-indigo-200 hover:bg-indigo-400/60 transition"
+            >
+              ⟩⟨
             </button>
           );
         })}
@@ -1038,6 +1078,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
   { keys: ["S"],             desc: "Διάσπαση segment στη θέση cursor" },
   { keys: ["Alt+Click"],     desc: "Διάσπαση segment στο σημείο κλικ" },
+  { keys: ["M"],             desc: "Συγχώνευση με το επόμενο segment" },
   { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
   { keys: ["F"],             desc: "Toggle auto-scroll (follow cursor)" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },

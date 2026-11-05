@@ -244,6 +244,10 @@ export interface SplitResponse {
   second: SegmentResponse;
 }
 
+export interface MergeResponse {
+  merged: SegmentResponse;
+}
+
 export interface WaveformData {
   peaks: number[];   // normalized 0..1 RMS values
   n_peaks: number;
