@@ -8,9 +8,12 @@ import { useBatchToggle } from "@/lib/use-batch-toggle";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
-// 50 px / second → a 10 s clip is 500 px wide. Horizontal scroll handles long
-// clips; proportionality lets the user eyeball cut lengths at a glance.
-const PX_PER_SECOND = 50;
+// Base pixels per second — multiplied by the zoom factor to get the live value.
+const BASE_PX_PER_SECOND = 50;
+// Zoom steps: each Ctrl+scroll step multiplies by this factor.
+const ZOOM_STEP = 1.25;
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 8;
 const MIN_BLOCK_PX = 6;    // keep tiny segments tappable
 const ROW_HEIGHT_PX = 56;
 
@@ -34,6 +37,8 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const [selected, setSelected] = useState<number | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [showHelp, setShowHelp] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const pxPerSec = BASE_PX_PER_SECOND * zoom;
 
   // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
   // replay it. Using a ref avoids stale-closure issues in event handlers;
@@ -94,18 +99,33 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     for (const chunk of edl.render_chunks) {
       if (currentTime < chunk.output_start || currentTime >= chunk.output_end) continue;
       if (chunk.segment_index === -1) {
-        // Hook chunk
         if (!edl.hook) continue;
         const src = edl.hook.start + (currentTime - chunk.output_start);
-        return { clipId: edl.hook.clip_id, sourceX: src * PX_PER_SECOND, isHook: true };
+        return { clipId: edl.hook.clip_id, sourceX: src * pxPerSec, isHook: true };
       }
       const seg = edl.segments[chunk.segment_index];
       if (!seg) continue;
       const src = seg.start + (currentTime - chunk.output_start);
-      return { clipId: seg.clip_id, sourceX: src * PX_PER_SECOND, isHook: false };
+      return { clipId: seg.clip_id, sourceX: src * pxPerSec, isHook: false };
     }
     return null;
-  }, [currentTime, edl.render_chunks, edl.segments, edl.hook]);
+  }, [currentTime, edl.render_chunks, edl.segments, edl.hook, pxPerSec]);
+
+  // Map (clipId, sourceTime) → output time, used for waveform background clicks.
+  // Returns null when the source position falls inside a cut segment.
+  const sourceToOutput = useCallback(
+    (clipId: string, sourceTime: number): number | null => {
+      for (const [idx, outputStart] of outputStartBySegment) {
+        const seg = edl.segments[idx];
+        if (!seg || seg.clip_id !== clipId) continue;
+        if (sourceTime >= seg.start && sourceTime <= seg.end) {
+          return outputStart + (sourceTime - seg.start);
+        }
+      }
+      return null;
+    },
+    [outputStartBySegment, edl.segments],
+  );
 
   const selectAndSeek = (index: number) => {
     setSelected(index);
@@ -195,20 +215,34 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     return () => window.removeEventListener("keydown", onKey);
   }, [edl.segments, filteredSegmentOrder, selected, toggleMut, onDirty, handleUndo, pushUndo]);
 
+  // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
+  // only fires while the pointer is inside the timeline, not the whole page.
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    setZoom((z) => {
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * factor));
+    });
+  }, []);
+
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-4" onWheelCapture={handleWheel}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
           <StatsBar stats={stats} />
           <FilterToggle value={filter} stats={stats} onChange={setFilter} />
         </div>
-        <BulkActions
-          segments={edl.segments}
-          batchMut={batchMut}
-          undoCount={undoCount}
-          onUndo={handleUndo}
-          onDirty={onDirty}
-        />
+        <div className="flex items-center gap-2">
+          <ZoomControl zoom={zoom} onChange={setZoom} />
+          <BulkActions
+            segments={edl.segments}
+            batchMut={batchMut}
+            undoCount={undoCount}
+            onUndo={handleUndo}
+            onDirty={onDirty}
+          />
+        </div>
       </div>
 
       <div className="glass-card overflow-x-auto rounded-2xl">
@@ -221,6 +255,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                 edl.render_chunks.find((c) => c.segment_index === -1)?.output_start ?? 0
               }
               jobId={jobId}
+              pxPerSec={pxPerSec}
               cursorX={
                 activeCursor?.isHook && activeCursor.clipId === edl.hook.clip_id
                   ? activeCursor.sourceX
@@ -243,12 +278,17 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
               clip={clip}
               items={visibleItems}
               selectedIndex={selected}
+              pxPerSec={pxPerSec}
               cursorX={
                 activeCursor && !activeCursor.isHook && activeCursor.clipId === clip.clip_id
                   ? activeCursor.sourceX
                   : null
               }
               onSelect={selectAndSeek}
+              onWaveformClick={(srcTime) => {
+                const ot = sourceToOutput(clip.clip_id, srcTime);
+                if (ot !== null) onSeekRequest?.(ot);
+              }}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
                 if (seg) pushUndo(index, seg.decision as Decision);
@@ -300,6 +340,7 @@ function HookRow({
   outputTime,
   jobId,
   cursorX,
+  pxPerSec,
   onSeekRequest,
 }: {
   hook: SegmentDict;
@@ -307,10 +348,11 @@ function HookRow({
   outputTime: number;
   jobId: string;
   cursorX: number | null;
+  pxPerSec: number;
   onSeekRequest?: (t: number) => void;
 }) {
   const dur = hook.end - hook.start;
-  const widthPx = Math.max(80, Math.round(dur * PX_PER_SECOND));
+  const widthPx = Math.max(80, Math.round(dur * pxPerSec));
 
   const waveformQ = useQuery({
     queryKey: ["waveform", jobId, hook.clip_id],
@@ -372,7 +414,9 @@ function ClipRow({
   items,
   selectedIndex,
   cursorX,
+  pxPerSec,
   onSelect,
+  onWaveformClick,
   onToggle,
 }: {
   jobId: string;
@@ -380,10 +424,12 @@ function ClipRow({
   items: { seg: SegmentDict; index: number }[];
   selectedIndex: number | null;
   cursorX: number | null;
+  pxPerSec: number;
   onSelect: (index: number) => void;
+  onWaveformClick: (sourceTime: number) => void;
   onToggle: (index: number, next: Decision) => void;
 }) {
-  const widthPx = Math.max(120, Math.round(clip.duration * PX_PER_SECOND));
+  const widthPx = Math.max(120, Math.round(clip.duration * pxPerSec));
 
   const waveformQ = useQuery({
     queryKey: ["waveform", jobId, clip.clip_id],
@@ -401,8 +447,15 @@ function ClipRow({
         <div className="font-mono text-white/40">{clip.duration.toFixed(1)}s</div>
       </div>
       <div
-        className="relative"
+        className="relative cursor-crosshair"
         style={{ width: widthPx, height: ROW_HEIGHT_PX }}
+        onClick={(e) => {
+          // Only fire when clicking the row background, not a child segment block.
+          if (e.target !== e.currentTarget) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const srcTime = (e.clientX - rect.left) / pxPerSec;
+          onWaveformClick(Math.max(0, Math.min(clip.duration, srcTime)));
+        }}
       >
         {waveformQ.data && (
           <WaveformBackground
@@ -412,10 +465,10 @@ function ClipRow({
           />
         )}
         {items.map(({ seg, index }) => {
-          const left = Math.round(seg.start * PX_PER_SECOND);
+          const left = Math.round(seg.start * pxPerSec);
           const w = Math.max(
             MIN_BLOCK_PX,
-            Math.round((seg.end - seg.start) * PX_PER_SECOND),
+            Math.round((seg.end - seg.start) * pxPerSec),
           );
           const keep = seg.decision === "keep";
           const active = selectedIndex === index;
@@ -756,6 +809,39 @@ function StatsBar({
 
 
 // ---------------------------------------------------------------------------
+// Timeline zoom control
+// ---------------------------------------------------------------------------
+
+function ZoomControl({ zoom, onChange }: { zoom: number; onChange: (z: number) => void }) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(ZOOM_MIN, zoom / ZOOM_STEP))}
+        disabled={zoom <= ZOOM_MIN}
+        title="Zoom out (Ctrl+scroll)"
+        className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-xs text-white/50 transition hover:border-white/20 hover:text-white/80 disabled:opacity-30"
+      >
+        −
+      </button>
+      <span className="w-10 text-center font-mono text-[10px] text-white/35">
+        {Math.round(zoom * 100)}%
+      </span>
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(ZOOM_MAX, zoom * ZOOM_STEP))}
+        disabled={zoom >= ZOOM_MAX}
+        title="Zoom in (Ctrl+scroll)"
+        className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-xs text-white/50 transition hover:border-white/20 hover:text-white/80 disabled:opacity-30"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // Keyboard shortcut help overlay
 // ---------------------------------------------------------------------------
 
@@ -769,6 +855,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["Space"],         desc: "Play / Pause" },
   { keys: ["←", "→"],       desc: "Seek ±5s (στο player)" },
   { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
+  { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },
   { keys: ["Esc"],           desc: "Κλείσιμο" },
 ];
