@@ -29,6 +29,7 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const thumbnails = outputs.filter((o) => o.kind === "thumbnail");
   const chapterFiles = outputs.filter((o) => o.kind === "chapters_txt");
   const fcpxmlFiles = outputs.filter((o) => o.kind === "fcpxml");
+  const cmxFiles = outputs.filter((o) => o.kind === "cmx_edl");
 
   return (
     <section className="flex flex-col gap-3">
@@ -62,6 +63,14 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
                 file={o}
                 href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
                 label="FCP XML"
+              />
+            ))}
+            {cmxFiles.map((o) => (
+              <OutputRow
+                key={o.name}
+                file={o}
+                href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
+                label="CMX EDL"
               />
             ))}
           </ul>

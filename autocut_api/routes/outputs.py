@@ -29,6 +29,7 @@ _OUTPUT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("chapters*.txt", "chapters_txt"),
     ("chapters*.json", "chapters_json"),
     ("*.fcpxml", "fcpxml"),
+    ("*.edl", "cmx_edl"),
 )
 
 _MEDIA_TYPES = {
@@ -40,6 +41,7 @@ _MEDIA_TYPES = {
     "chapters_txt": "text/plain; charset=utf-8",
     "chapters_json": "application/json",
     "fcpxml": "application/xml",
+    "cmx_edl": "text/plain; charset=utf-8",
 }
 
 

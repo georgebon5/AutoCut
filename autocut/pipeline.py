@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
 from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
+from autocut.cmx_edl import save_cmx
 from autocut.config import AutoCutConfig, TransitionConfig
 from autocut.fcpxml import save_fcpxml
 from autocut.edl import EDL, save_edl
@@ -473,13 +474,21 @@ def run_pipeline(
             rep.info(f"wrote {len(chapters)} chapters")
 
         # FCPXML: NLE-ready edit decision list pointing at original footage.
-        fcp_stem = stem.removeprefix("rough_cut") or ""
-        fcp_path = output_dir / f"rough_cut{fcp_stem}.fcpxml"
+        nle_stem = stem.removeprefix("rough_cut") or ""
+        fcp_path = output_dir / f"rough_cut{nle_stem}.fcpxml"
         try:
             save_fcpxml(edl, fcp_path, sequence_name=fcp_path.stem)
             rep.info(f"wrote {fcp_path.name}")
         except Exception:
             pass  # FCPXML is a convenience; never abort the pipeline for it.
+
+        # CMX 3600 EDL: compatible with Premiere Pro, DaVinci Resolve, Avid.
+        cmx_path = output_dir / f"rough_cut{nle_stem}.edl"
+        try:
+            save_cmx(edl, cmx_path, title=cmx_path.stem)
+            rep.info(f"wrote {cmx_path.name}")
+        except Exception:
+            pass
 
         # Cut-aligned captions: timestamps match the mp4 we just produced,
         # so the user can burn them in or import into an NLE without drift.
@@ -776,6 +785,12 @@ def _run_voiceover_pipeline(
     try:
         save_fcpxml(edl, output_dir / "rough_cut.fcpxml", sequence_name="rough_cut")
         rep.info("wrote rough_cut.fcpxml")
+    except Exception:
+        pass
+
+    try:
+        save_cmx(edl, output_dir / "rough_cut.edl", title="rough_cut")
+        rep.info("wrote rough_cut.edl")
     except Exception:
         pass
 
