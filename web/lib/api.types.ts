@@ -158,7 +158,9 @@ export interface Edl {
 }
 
 export interface SegmentUpdate {
-  decision: Decision;
+  decision?: Decision;
+  start?: number;   // new start boundary in seconds
+  end?: number;     // new end boundary in seconds
 }
 
 export interface WordUpdate {

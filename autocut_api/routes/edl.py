@@ -97,6 +97,9 @@ def get_edl(
     return edl_to_dict(load_edl(path))
 
 
+_MIN_SEGMENT_DURATION = 0.05  # seconds — guard against zero-width trim
+
+
 @router.patch("/{job_id}/segments/{index}", response_model=SegmentResponse)
 def patch_segment(
     request: Request,
@@ -106,8 +109,12 @@ def patch_segment(
     preset: str | None = Query(default=None),
     session: Session = Depends(get_db),
 ) -> SegmentResponse:
-    """Override one segment's keep/cut decision. Marks source as 'user'."""
-    if update.decision not in _VALID_DECISIONS:
+    """Override a segment's keep/cut decision and/or its start/end boundaries."""
+    has_decision = update.decision is not None
+    has_trim = update.start is not None or update.end is not None
+    if not has_decision and not has_trim:
+        raise HTTPException(status_code=422, detail="must provide decision, start, or end")
+    if has_decision and update.decision not in _VALID_DECISIONS:
         raise HTTPException(
             status_code=422,
             detail=f"decision must be one of {list(_VALID_DECISIONS)}",
@@ -124,39 +131,63 @@ def patch_segment(
         )
 
     seg = edl.segments[index]
-    previous_decision = seg.decision
 
-    # Snapshot the override BEFORE mutating state — the row is append-only
-    # training data; the first row for a (job, preset, segment) carries the
-    # pipeline's original auto_decision as its previous_decision.
-    session.add(SegmentOverride(
-        job_id=job.id,
-        preset=preset_label,
-        segment_index=index,
-        clip_id=seg.clip_id,
-        segment_start=seg.start,
-        segment_end=seg.end,
-        previous_decision=previous_decision,
-        new_decision=update.decision,
-        interest_score=seg.interest_score,
-        features_json=json.dumps(seg.features),
-    ))
+    # ── Decision change ───────────────────────────────────────────────────────
+    if has_decision:
+        previous_decision = seg.decision
+        # Snapshot the override BEFORE mutating — the row is append-only
+        # training data; the first row for a (job, preset, segment) carries
+        # the pipeline's original auto_decision as its previous_decision.
+        session.add(SegmentOverride(
+            job_id=job.id,
+            preset=preset_label,
+            segment_index=index,
+            clip_id=seg.clip_id,
+            segment_start=seg.start,
+            segment_end=seg.end,
+            previous_decision=previous_decision,
+            new_decision=update.decision,
+            interest_score=seg.interest_score,
+            features_json=json.dumps(seg.features),
+        ))
+        seg.decision = update.decision   # type: ignore[assignment]
+        seg.decision_source = "user"
+        seg.reasons.append(f"user {update.decision}")
 
-    seg.decision = update.decision   # type: ignore[assignment]
-    seg.decision_source = "user"
-    seg.reasons.append(f"user {update.decision}")
+    # ── Boundary trim ─────────────────────────────────────────────────────────
+    if has_trim:
+        # Find the clip to know its duration boundary.
+        clip = next((c for c in edl.clips if c.clip_id == seg.clip_id), None)
+        clip_dur = clip.duration if clip else float("inf")
+        new_start = seg.start if update.start is None else float(update.start)
+        new_end   = seg.end   if update.end   is None else float(update.end)
+        # Clamp: stay within clip, maintain minimum duration, start < end.
+        new_start = max(0.0, new_start)
+        new_end   = min(clip_dur, new_end)
+        if new_end - new_start < _MIN_SEGMENT_DURATION:
+            if update.start is not None:
+                new_start = new_end - _MIN_SEGMENT_DURATION
+            else:
+                new_end = new_start + _MIN_SEGMENT_DURATION
+        new_start = max(0.0, new_start)
+        new_end   = min(clip_dur, new_end)
+        seg.start = new_start
+        seg.end   = new_end
+
     save_edl(edl, path)
     session.commit()
 
-    # After committing, maybe trigger a background retrain.
-    override_count = session.scalar(
-        select(func.count()).select_from(SegmentOverride)
-    ) or 0
-    cfg = getattr(request.app.state, "config", None)
-    session_factory = getattr(request.app.state, "session_factory", None)
-    if cfg is not None and session_factory is not None:
-        from autocut_api.routes.train import maybe_auto_train
-        maybe_auto_train(override_count, session_factory, cfg)
+    # Trigger background retrain only when a decision changed (trims are not
+    # labelled examples for the classifier).
+    if has_decision:
+        override_count = session.scalar(
+            select(func.count()).select_from(SegmentOverride)
+        ) or 0
+        cfg = getattr(request.app.state, "config", None)
+        session_factory = getattr(request.app.state, "session_factory", None)
+        if cfg is not None and session_factory is not None:
+            from autocut_api.routes.train import maybe_auto_train
+            maybe_auto_train(override_count, session_factory, cfg)
 
     return SegmentResponse(
         index=index,

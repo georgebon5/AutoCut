@@ -117,8 +117,14 @@ class CompleteResponse(BaseModel):
 
 
 class SegmentUpdate(BaseModel):
-    """PATCH body for toggling a single segment's keep/cut decision."""
-    decision: str   # "keep" or "cut"
+    """PATCH body for a segment override: decision and/or boundary trim.
+
+    At least one field must be non-None. ``decision`` flips keep/cut;
+    ``start``/``end`` nudge the segment's time boundaries within the clip.
+    """
+    decision: str | None = None   # "keep" or "cut"
+    start: float | None = None    # new start time in seconds
+    end: float | None = None      # new end time in seconds
 
 
 class BatchSegmentItem(BaseModel):

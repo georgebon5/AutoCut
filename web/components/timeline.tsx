@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, getWaveform } from "@/lib/api";
 import { useBatchToggle } from "@/lib/use-batch-toggle";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
+import { useTrimSegment } from "@/lib/use-trim-segment";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
 // Base pixels per second — multiplied by the zoom factor to get the live value.
@@ -88,6 +89,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
 
   const toggleMut = useSegmentToggle(jobId, preset);
   const batchMut = useBatchToggle(jobId, preset);
+  const trimMut = useTrimSegment(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
@@ -289,6 +291,10 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                 const ot = sourceToOutput(clip.clip_id, srcTime);
                 if (ot !== null) onSeekRequest?.(ot);
               }}
+              onTrim={(index, start, end) => {
+                trimMut.mutate({ index, start, end });
+                onDirty?.();
+              }}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
                 if (seg) pushUndo(index, seg.decision as Decision);
@@ -408,6 +414,17 @@ function HookRow({
 }
 
 
+type TrimSide = "left" | "right";
+
+interface TrimState {
+  index: number;
+  side: TrimSide;
+  origStart: number;
+  origEnd: number;
+  startX: number;
+  dx: number;
+}
+
 function ClipRow({
   jobId,
   clip,
@@ -417,6 +434,7 @@ function ClipRow({
   pxPerSec,
   onSelect,
   onWaveformClick,
+  onTrim,
   onToggle,
 }: {
   jobId: string;
@@ -427,8 +445,10 @@ function ClipRow({
   pxPerSec: number;
   onSelect: (index: number) => void;
   onWaveformClick: (sourceTime: number) => void;
+  onTrim: (index: number, start: number | undefined, end: number | undefined) => void;
   onToggle: (index: number, next: Decision) => void;
 }) {
+  const [trimState, setTrimState] = useState<TrimState | null>(null);
   const widthPx = Math.max(120, Math.round(clip.duration * pxPerSec));
 
   const waveformQ = useQuery({
@@ -450,12 +470,30 @@ function ClipRow({
         className="relative cursor-crosshair"
         style={{ width: widthPx, height: ROW_HEIGHT_PX }}
         onClick={(e) => {
-          // Only fire when clicking the row background, not a child segment block.
           if (e.target !== e.currentTarget) return;
           const rect = e.currentTarget.getBoundingClientRect();
           const srcTime = (e.clientX - rect.left) / pxPerSec;
           onWaveformClick(Math.max(0, Math.min(clip.duration, srcTime)));
         }}
+        onPointerMove={(e) => {
+          if (!trimState) return;
+          setTrimState((s) => s ? { ...s, dx: e.clientX - s.startX } : null);
+        }}
+        onPointerUp={(e) => {
+          if (!trimState) return;
+          const { index, side, origStart, origEnd, dx } = trimState;
+          const dt = dx / pxPerSec;
+          if (side === "left") {
+            const ns = Math.max(0, Math.min(origStart + dt, origEnd - 0.05));
+            onTrim(index, ns, undefined);
+          } else {
+            const ne = Math.min(clip.duration, Math.max(origEnd + dt, origStart + 0.05));
+            onTrim(index, undefined, ne);
+          }
+          e.currentTarget.releasePointerCapture(e.pointerId);
+          setTrimState(null);
+        }}
+        onPointerCancel={() => setTrimState(null)}
       >
         {waveformQ.data && (
           <WaveformBackground
@@ -465,10 +503,22 @@ function ClipRow({
           />
         )}
         {items.map(({ seg, index }) => {
-          const left = Math.round(seg.start * pxPerSec);
+          // Apply live trim delta while dragging this segment's handle.
+          const isTrimming = trimState?.index === index;
+          let dispStart = seg.start;
+          let dispEnd = seg.end;
+          if (isTrimming && trimState) {
+            const dt = trimState.dx / pxPerSec;
+            if (trimState.side === "left") {
+              dispStart = Math.max(0, Math.min(trimState.origStart + dt, seg.end - 0.05));
+            } else {
+              dispEnd = Math.min(clip.duration, Math.max(trimState.origEnd + dt, seg.start + 0.05));
+            }
+          }
+          const left = Math.round(dispStart * pxPerSec);
           const w = Math.max(
             MIN_BLOCK_PX,
-            Math.round((seg.end - seg.start) * pxPerSec),
+            Math.round((dispEnd - dispStart) * pxPerSec),
           );
           const keep = seg.decision === "keep";
           const active = selectedIndex === index;
@@ -518,6 +568,47 @@ function ClipRow({
                 >
                   {dur.toFixed(1)}s
                 </span>
+              ) : null}
+              {/* Trim handles — visible only on selected kept segments */}
+              {active && keep ? (
+                <>
+                  <div
+                    aria-label="Trim start"
+                    className="absolute left-0 top-0 h-full w-2 cursor-ew-resize rounded-l-md bg-fuchsia-400/70 hover:bg-fuchsia-300 z-10"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      e.currentTarget.closest(".relative")?.setPointerCapture?.(e.pointerId);
+                      // Capture on the parent container so pointermove fires globally.
+                      (e.currentTarget.parentElement?.parentElement as HTMLElement | null)
+                        ?.setPointerCapture(e.pointerId);
+                      setTrimState({
+                        index,
+                        side: "left",
+                        origStart: seg.start,
+                        origEnd: seg.end,
+                        startX: e.clientX,
+                        dx: 0,
+                      });
+                    }}
+                  />
+                  <div
+                    aria-label="Trim end"
+                    className="absolute right-0 top-0 h-full w-2 cursor-ew-resize rounded-r-md bg-fuchsia-400/70 hover:bg-fuchsia-300 z-10"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      (e.currentTarget.parentElement?.parentElement as HTMLElement | null)
+                        ?.setPointerCapture(e.pointerId);
+                      setTrimState({
+                        index,
+                        side: "right",
+                        origStart: seg.start,
+                        origEnd: seg.end,
+                        startX: e.clientX,
+                        dx: 0,
+                      });
+                    }}
+                  />
+                </>
               ) : null}
             </button>
           );

@@ -182,6 +182,57 @@ def test_patch_invalid_decision_returns_422(app_client):
     assert r.status_code == 422
 
 
+def test_patch_empty_body_returns_422(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=2))
+    r = client.patch(f"/jobs/{jid}/segments/0", json={})
+    assert r.status_code == 422
+
+
+def test_patch_trim_start_moves_boundary(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    r = client.patch(f"/jobs/{jid}/segments/1", json={"start": 1.3})
+    assert r.status_code == 200
+    body = r.json()
+    assert abs(body["start"] - 1.3) < 1e-6
+    assert body["end"] == 2.0   # unchanged
+
+
+def test_patch_trim_end_moves_boundary(app_client):
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    r = client.patch(f"/jobs/{jid}/segments/0", json={"end": 0.7})
+    assert r.status_code == 200
+    body = r.json()
+    assert abs(body["end"] - 0.7) < 1e-6
+    assert body["start"] == 0.0   # unchanged
+
+
+def test_patch_trim_clamped_to_min_duration(app_client):
+    """start dragged past end is clamped so duration >= 0.05s."""
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    r = client.patch(f"/jobs/{jid}/segments/0", json={"start": 0.98})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["end"] - body["start"] >= 0.05
+
+
+def test_patch_trim_does_not_log_override(app_client):
+    """Trim-only PATCHes are not training data — no SegmentOverride row."""
+    from autocut_api.models import SegmentOverride
+    from sqlalchemy import select
+    app, client, tmp = app_client
+    jid = _seed_job(app, tmp, edl=_make_edl(num_segments=3))
+    client.patch(f"/jobs/{jid}/segments/0", json={"start": 0.1})
+    with app.state.session_factory() as session:
+        count = session.scalar(select(SegmentOverride).where(
+            SegmentOverride.job_id == jid
+        ).with_only_columns(__import__("sqlalchemy").func.count())) or 0
+    assert count == 0
+
+
 def test_patch_before_done_returns_409(app_client):
     app, client, tmp = app_client
     jid = _seed_job(app, tmp, edl=_make_edl(), status="running")
