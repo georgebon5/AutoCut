@@ -102,6 +102,10 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const mergeMut = useMergeSegment(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
+  const totalDuration = useMemo(
+    () => edl.clips.reduce((m, c) => Math.max(m, c.duration), 0),
+    [edl.clips],
+  );
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
 
   // Map output-video currentTime to a source position within one clip, so we
@@ -310,6 +314,11 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         className="glass-card overflow-x-auto rounded-2xl"
         onScroll={handleScrollContainer}
       >
+        <TimelineRuler
+          totalDuration={totalDuration}
+          pxPerSec={pxPerSec}
+          cursorX={activeCursor?.sourceX ?? null}
+        />
         <div className="flex min-w-full flex-col divide-y divide-white/5">
           {edl.hook ? (
             <HookRow
@@ -997,6 +1006,89 @@ function StatsBar({
         {stats.keepSec.toFixed(1)}s από {totalSec.toFixed(1)}s ({pct}%)
       </span>
       <span className="text-white/35">· {total} κομμάτια σύνολο</span>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Timeline ruler — timecode ticks that scale with zoom
+// ---------------------------------------------------------------------------
+
+// Label column width in pixels: px-3 (12) + w-24 (96) + gap-3 (12) = 120
+const RULER_LABEL_OFFSET = 120;
+const RULER_HEIGHT = 22;
+// "Nice" intervals in seconds; we pick the smallest one that keeps labels
+// at least ~72 px apart so they never overlap.
+const RULER_INTERVALS = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+
+function fmtRulerTime(s: number): string {
+  if (s < 60) return s % 1 === 0 ? `${s}s` : `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return sec === 0 ? `${m}m` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function TimelineRuler({
+  totalDuration,
+  pxPerSec,
+  cursorX,
+}: {
+  totalDuration: number;
+  pxPerSec: number;
+  cursorX: number | null;
+}) {
+  if (totalDuration <= 0) return null;
+
+  const contentWidth = Math.max(120, Math.round(totalDuration * pxPerSec));
+
+  // Choose the major interval that keeps labels at least 72 px apart.
+  const minGapSec = 72 / pxPerSec;
+  const majorInterval = RULER_INTERVALS.find((n) => n >= minGapSec) ?? 600;
+  const MINOR_PER_MAJOR = 5;
+  const minorInterval = majorInterval / MINOR_PER_MAJOR;
+
+  const nMinor = Math.ceil(totalDuration / minorInterval) + 1;
+  const ticks = Array.from({ length: nMinor }, (_, i) => ({
+    x: Math.round(i * minorInterval * pxPerSec),
+    t: i * minorInterval,
+    major: i % MINOR_PER_MAJOR === 0,
+  })).filter(({ t }) => t <= totalDuration + minorInterval * 0.5);
+
+  return (
+    <div
+      className="flex select-none border-b border-white/5 bg-black/25"
+      style={{ height: RULER_HEIGHT, minWidth: RULER_LABEL_OFFSET + contentWidth }}
+    >
+      {/* Spacer that lines up with the clip-label column */}
+      <div style={{ width: RULER_LABEL_OFFSET, minWidth: RULER_LABEL_OFFSET }} />
+      <div className="relative" style={{ width: contentWidth, height: RULER_HEIGHT }}>
+        {ticks.map(({ x, t, major }) => (
+          <div
+            key={t}
+            className="absolute top-0"
+            style={{ left: x }}
+          >
+            <div
+              className={major ? "w-px bg-white/25" : "w-px bg-white/12"}
+              style={{ height: major ? 10 : 5, marginTop: major ? 0 : 5 }}
+            />
+            {major && t > 0 ? (
+              <span className="absolute top-[11px] left-0.5 font-mono text-[8px] leading-none text-white/30 whitespace-nowrap">
+                {fmtRulerTime(t)}
+              </span>
+            ) : null}
+          </div>
+        ))}
+        {/* Playback cursor mark */}
+        {cursorX !== null ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-0 w-px bg-cyan-300/60"
+            style={{ left: Math.round(cursorX), height: RULER_HEIGHT }}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

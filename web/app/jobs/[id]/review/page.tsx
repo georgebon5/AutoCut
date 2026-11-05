@@ -88,6 +88,19 @@ export default function ReviewPage() {
     () => {
       qc.invalidateQueries({ queryKey: ["job", jobId] });
       qc.invalidateQueries({ queryKey: ["edl", jobId] });
+      // Fire a browser notification when the tab is in the background.
+      if (typeof Notification !== "undefined" && document.visibilityState !== "visible") {
+        const send = () =>
+          new Notification("AutoCut", {
+            body: `Job ${jobId.slice(0, 8)} ολοκληρώθηκε — έτοιμο για review.`,
+            icon: "/favicon.ico",
+          });
+        if (Notification.permission === "granted") {
+          send();
+        } else if (Notification.permission === "default") {
+          void Notification.requestPermission().then((p) => { if (p === "granted") send(); });
+        }
+      }
     },
   );
 
