@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from autocut.captions import write_cut_captions
+from autocut.chapters import generate_chapters, write_chapters_json, write_chapters_txt
 from autocut.config import AutoCutConfig
 from autocut.edl import EDL, save_edl
 from autocut.thumbnail import extract_thumbnail
@@ -453,6 +454,15 @@ def run_pipeline(
         if extract_thumbnail(out_mp4, edl, output_dir / thumb_name):
             rep.info(f"wrote {thumb_name}")
 
+        # Chapters: written only when ≥ 2 chapters are detected so single-
+        # topic videos don't produce an empty/trivial chapters file.
+        chapters = generate_chapters(edl)
+        if len(chapters) >= 2:
+            ch_stem = stem.removeprefix("rough_cut") or ""
+            write_chapters_txt(chapters, output_dir / f"chapters{ch_stem}.txt")
+            write_chapters_json(chapters, output_dir / f"chapters{ch_stem}.json")
+            rep.info(f"wrote {len(chapters)} chapters")
+
         # Cut-aligned captions: timestamps match the mp4 we just produced,
         # so the user can burn them in or import into an NLE without drift.
         if do_captions and any(t.words for t in all_transcripts.values()):
@@ -738,6 +748,12 @@ def _run_voiceover_pipeline(
 
     if extract_thumbnail(out_mp4, edl, output_dir / "thumbnail.jpg"):
         rep.info("wrote thumbnail.jpg")
+
+    chapters = generate_chapters(edl)
+    if len(chapters) >= 2:
+        write_chapters_txt(chapters, output_dir / "chapters.txt")
+        write_chapters_json(chapters, output_dir / "chapters.json")
+        rep.info(f"wrote {len(chapters)} chapters")
 
     return PipelineResult(
         proxies=proxies,

@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { listOutputs, outputDownloadUrl } from "@/lib/api";
+import { fetchOutputText, listOutputs, outputDownloadUrl } from "@/lib/api";
 import type { OutputFile } from "@/lib/api.types";
 
 
@@ -26,6 +27,7 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const outputs = outputsQ.data?.outputs ?? [];
   const videos = outputs.filter((o) => o.kind === “video”);
   const thumbnails = outputs.filter((o) => o.kind === “thumbnail”);
+  const chapterFiles = outputs.filter((o) => o.kind === “chapters_txt”);
 
   return (
     <section className=”flex flex-col gap-3”>
@@ -53,6 +55,73 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
                 href={`${outputDownloadUrl(jobId, o.name)}?v=${encodeURIComponent(cacheKey)}`}
               />
             ))}
+          </ul>
+        )}
+      </div>
+
+      {chapterFiles.map((f) => (
+        <ChaptersCard key={f.name} jobId={jobId} file={f} cacheKey={cacheKey} />
+      ))}
+    </section>
+  );
+}
+
+
+function ChaptersCard({
+  jobId,
+  file,
+  cacheKey,
+}: {
+  jobId: string;
+  file: OutputFile;
+  cacheKey: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const textQ = useQuery({
+    queryKey: ["chapters-txt", jobId, file.name, cacheKey],
+    queryFn: () => fetchOutputText(jobId, file.name),
+  });
+
+  const lines = (textQ.data ?? "").trim().split("\n").filter(Boolean);
+
+  const handleCopy = async () => {
+    if (!textQ.data) return;
+    await navigator.clipboard.writeText(textQ.data);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+          Chapters
+        </h2>
+        <button
+          onClick={handleCopy}
+          disabled={!textQ.data}
+          className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/60 transition hover:border-white/20 hover:text-white/80 disabled:opacity-40"
+        >
+          {copied ? "Copied!" : "Copy for YouTube"}
+        </button>
+      </div>
+      <div className="glass-card rounded-2xl p-4">
+        {textQ.isLoading ? (
+          <p className="text-sm text-white/40">Φόρτωση…</p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {lines.map((line, i) => {
+              const spaceIdx = line.indexOf(" ");
+              const ts = spaceIdx > -1 ? line.slice(0, spaceIdx) : line;
+              const title = spaceIdx > -1 ? line.slice(spaceIdx + 1) : "";
+              return (
+                <li key={i} className="flex items-baseline gap-2.5">
+                  <span className="shrink-0 font-mono text-xs text-cyan-400/80">{ts}</span>
+                  <span className="text-sm text-white/70">{title}</span>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

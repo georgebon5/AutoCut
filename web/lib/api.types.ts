@@ -172,7 +172,7 @@ export interface SegmentResponse {
 export interface OutputFile {
   name: string;
   size: number;
-  kind: "video" | "edl" | "captions_srt" | "captions_ass" | "thumbnail";
+  kind: "video" | "edl" | "captions_srt" | "captions_ass" | "thumbnail" | "chapters_txt" | "chapters_json";
 }
 
 export interface OutputsListResponse {

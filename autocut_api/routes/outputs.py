@@ -26,6 +26,8 @@ _OUTPUT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("*.srt", "captions_srt"),
     ("*.ass", "captions_ass"),
     ("thumbnail*.jpg", "thumbnail"),
+    ("chapters*.txt", "chapters_txt"),
+    ("chapters*.json", "chapters_json"),
 )
 
 _MEDIA_TYPES = {
@@ -34,6 +36,8 @@ _MEDIA_TYPES = {
     "captions_srt": "application/x-subrip",
     "captions_ass": "text/plain; charset=utf-8",
     "thumbnail": "image/jpeg",
+    "chapters_txt": "text/plain; charset=utf-8",
+    "chapters_json": "application/json",
 }
 
 

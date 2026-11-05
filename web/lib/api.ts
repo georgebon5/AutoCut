@@ -157,6 +157,14 @@ export const listOutputs = (jobId: string) =>
 export const outputDownloadUrl = (jobId: string, filename: string) =>
   `${BASE}/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
 
+/** Fetch a text output file as a plain string (used for chapters preview). */
+export const fetchOutputText = async (jobId: string, filename: string): Promise<string> => {
+  const url = `${BASE}/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new ApiError(res.status, res.statusText, url);
+  return res.text();
+};
+
 // ---------------------------------------------------------------------------
 // Re-render (cached — no re-analysis)
 // ---------------------------------------------------------------------------
