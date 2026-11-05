@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchOutputText, listOutputs, outputDownloadUrl } from "@/lib/api";
+import { bundleDownloadUrl, fetchOutputText, listOutputs, outputDownloadUrl } from "@/lib/api";
 import type { OutputFile } from "@/lib/api.types";
 
 
@@ -30,12 +30,25 @@ export default function DownloadsPanel({ jobId, cacheKey }: Props) {
   const chapterFiles = outputs.filter((o) => o.kind === "chapters_txt");
   const fcpxmlFiles = outputs.filter((o) => o.kind === "fcpxml");
   const cmxFiles = outputs.filter((o) => o.kind === "cmx_edl");
+  // Show the bundle button when there's at least one NLE file alongside the video.
+  const hasBundle = videos.length > 0 && (fcpxmlFiles.length > 0 || cmxFiles.length > 0);
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
-        Κατέβασμα βίντεο
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+          Κατέβασμα βίντεο
+        </h2>
+        {hasBundle && (
+          <a
+            href={bundleDownloadUrl(jobId)}
+            download={`autocut_${jobId.slice(0, 8)}.zip`}
+            className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white/60 transition hover:border-white/20 hover:bg-white/10 hover:text-white/90"
+          >
+            Κατέβασε όλα (.zip)
+          </a>
+        )}
+      </div>
 
       {thumbnails.length > 0 && (
         <ThumbnailStrip jobId={jobId} thumbnails={thumbnails} cacheKey={cacheKey} />

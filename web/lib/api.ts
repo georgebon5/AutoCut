@@ -158,6 +158,10 @@ export const listOutputs = (jobId: string) =>
 export const outputDownloadUrl = (jobId: string, filename: string) =>
   `${BASE}/jobs/${jobId}/outputs/${encodeURIComponent(filename)}`;
 
+/** URL for the ZIP bundle containing all user-facing outputs. */
+export const bundleDownloadUrl = (jobId: string) =>
+  `${BASE}/jobs/${jobId}/outputs/bundle.zip`;
+
 /** Fetch pre-computed waveform peaks for one clip. */
 export const getWaveform = (jobId: string, clipId: string) =>
   request<WaveformData>(

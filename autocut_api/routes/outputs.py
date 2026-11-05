@@ -7,10 +7,12 @@ new output artifact must opt in by matching a pattern below.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from autocut_api.dependencies import get_db
@@ -68,6 +70,45 @@ def _get_done_job(session: Session, job_id: str) -> Job:
     if not job.workspace:
         raise HTTPException(status_code=409, detail="job has no workspace")
     return job
+
+
+# Kinds excluded from the bundle (internal / frontend-only artifacts).
+_BUNDLE_EXCLUDE_KINDS = frozenset({"edl", "waveform"})
+
+
+@router.get("/{job_id}/outputs/bundle.zip")
+def download_bundle(
+    job_id: str,
+    session: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Stream a zip of all user-facing output files for a job."""
+    job = _get_done_job(session, job_id)
+    workspace = Path(job.workspace)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        seen: set[str] = set()
+        for pattern, kind in _OUTPUT_PATTERNS:
+            if kind in _BUNDLE_EXCLUDE_KINDS:
+                continue
+            for path in sorted(workspace.glob(pattern)):
+                if not path.is_file() or path.name in seen:
+                    continue
+                seen.add(path.name)
+                compress = (
+                    zipfile.ZIP_STORED if kind == "video"
+                    else zipfile.ZIP_DEFLATED
+                )
+                zf.write(path, arcname=path.name, compress_type=compress)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="autocut_{job_id[:8]}.zip"',
+        },
+    )
 
 
 @router.get("/{job_id}/outputs", response_model=OutputsListResponse)

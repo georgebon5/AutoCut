@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -216,6 +218,83 @@ def test_download_before_done_returns_409(app_client):
 
 
 # ---------------------------------------------------------------------------
+# Bundle (ZIP)
+# ---------------------------------------------------------------------------
+
+def test_bundle_returns_zip_with_video(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, files={"rough_cut.mp4": b"fake-video"})
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert "rough_cut.mp4" in zf.namelist()
+    assert zf.read("rough_cut.mp4") == b"fake-video"
+
+
+def test_bundle_excludes_edl_and_waveform(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, files={
+        "rough_cut.mp4": b"vid",
+        "edl.json": b'{"keep":true}',
+        "waveform_clip1.json": b'{"peaks":[]}',
+    })
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "rough_cut.mp4" in names
+    assert "edl.json" not in names
+    assert "waveform_clip1.json" not in names
+
+
+def test_bundle_includes_nle_files(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, files={
+        "rough_cut.mp4": b"vid",
+        "export.fcpxml": b"<fcpxml/>",
+        "export.edl": b"TITLE: test\n",
+        "clip.srt": b"1\n00:00\n",
+    })
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "export.fcpxml" in names
+    assert "export.edl" in names
+    assert "clip.srt" in names
+
+
+def test_bundle_empty_workspace_returns_empty_zip(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, files={})
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == []
+
+
+def test_bundle_unknown_job_returns_404(app_client):
+    _, client = app_client
+    r = client.get("/jobs/unknown/outputs/bundle.zip")
+    assert r.status_code == 404
+
+
+def test_bundle_before_done_returns_409(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, status="running", files={"rough_cut.mp4": b"x"})
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 409
+
+
+def test_bundle_filename_contains_job_id(app_client):
+    app, client = app_client
+    jid, _ = _seed_job(app, files={"rough_cut.mp4": b"x"})
+    r = client.get(f"/jobs/{jid}/outputs/bundle.zip")
+    assert r.status_code == 200
+    disposition = r.headers.get("content-disposition", "")
+    assert jid[:8] in disposition
+
+
+# ---------------------------------------------------------------------------
 # OpenAPI
 # ---------------------------------------------------------------------------
 
@@ -224,3 +303,4 @@ def test_openapi_includes_output_routes(app_client):
     schema = client.get("/openapi.json").json()
     assert "/jobs/{job_id}/outputs" in schema["paths"]
     assert "/jobs/{job_id}/outputs/{filename}" in schema["paths"]
+    assert "/jobs/{job_id}/outputs/bundle.zip" in schema["paths"]
