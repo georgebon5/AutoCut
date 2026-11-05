@@ -8,11 +8,13 @@ pipeline function (resolved from ``app.state``) to the thread pool.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import delete as sa_delete, desc, select
 from sqlalchemy.orm import Session
 
@@ -246,3 +248,67 @@ def delete_job(job_id: str, session: Session = Depends(get_db)) -> Response:
     session.delete(job)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+_TERMINAL = frozenset({"done", "failed"})
+_SSE_POLL_INTERVAL = 0.35   # seconds between DB reads
+_SSE_KEEPALIVE_EVERY = 15   # send a comment every N seconds to prevent proxy timeouts
+
+
+@router.get("/{job_id}/events")
+async def job_events(job_id: str, request: Request) -> StreamingResponse:
+    """Server-Sent Events stream for a single job.
+
+    Sends a ``data`` event whenever stage/progress/status changes and a named
+    ``done`` event when the job reaches a terminal state. A comment keepalive
+    is sent every 15 s so proxies don't time out the idle connection.
+    """
+    factory = request.app.state.session_factory
+
+    async def generate():
+        prev = ("", -1.0, "")
+        ticks_since_keepalive = 0
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            with factory() as s:
+                job = s.get(Job, job_id)
+
+            if job is None:
+                yield f"data: {json.dumps({'error': 'not found'})}\n\n"
+                return
+
+            current = (job.stage, round(job.progress, 4), job.status)
+            if current != prev:
+                prev = current
+                payload = json.dumps({
+                    "stage": job.stage,
+                    "progress": job.progress,
+                    "status": job.status,
+                    "error": job.error,
+                })
+                yield f"data: {payload}\n\n"
+                ticks_since_keepalive = 0
+
+            if job.status in _TERMINAL:
+                yield f"event: done\ndata: {{}}\n\n"
+                return
+
+            ticks_since_keepalive += 1
+            if ticks_since_keepalive >= _SSE_KEEPALIVE_EVERY / _SSE_POLL_INTERVAL:
+                yield ": keepalive\n\n"
+                ticks_since_keepalive = 0
+
+            await asyncio.sleep(_SSE_POLL_INTERVAL)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",          # prevents nginx from buffering SSE
+            "Connection": "keep-alive",
+        },
+    )

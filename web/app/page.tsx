@@ -5,20 +5,16 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { ApiError, deleteJob, getTrainStatus, listJobs, patchJobLabel, triggerTrain } from "@/lib/api";
+import { useJobEvents } from "@/lib/use-job-events";
 import type { Job, TrainStatus } from "@/lib/api.types";
-
-/** Only running jobs need live polling; terminal jobs are checked less often. */
-function usePollingInterval(jobs: Job[] | undefined): number | false {
-  if (!jobs) return false;
-  const live = jobs.some((j) => j.status === "pending" || j.status === "running");
-  return live ? 1_500 : false;
-}
 
 export default function HomePage() {
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: listJobs,
-    refetchInterval: (q) => usePollingInterval(q.state.data as Job[] | undefined),
+    // SSE streams in each live JobRow drive fast invalidation; this is a
+    // slow safety-net refetch in case a stream drops or we miss an event.
+    refetchInterval: 10_000,
   });
 
   return (
@@ -68,6 +64,13 @@ function JobRow({ job }: { job: Job }) {
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [editingLabel, setEditingLabel] = useState(false);
+  const isLive = job.status === "pending" || job.status === "running";
+  useJobEvents(
+    job.id,
+    isLive,
+    () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+    () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  );
   const [labelDraft, setLabelDraft] = useState(job.label ?? "");
   const labelInputRef = useRef<HTMLInputElement | null>(null);
 

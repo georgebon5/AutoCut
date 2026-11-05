@@ -11,6 +11,7 @@ import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
 import { ApiError, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
+import { useJobEvents } from "@/lib/use-job-events";
 import type { CaptionStyle, Job, JobConfig } from "@/lib/api.types";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
@@ -28,10 +29,6 @@ const STATUS_LABEL: Record<"pending" | "running" | "done" | "failed", string> = 
   done: "έτοιμο",
   failed: "απέτυχε",
 };
-
-function usePollWhileRunning(job: Job | undefined): number | false {
-  return job && (job.status === "running" || job.status === "pending") ? 1_500 : false;
-}
 
 export default function ReviewPage() {
   const params = useParams<{ id: string }>();
@@ -71,9 +68,21 @@ export default function ReviewPage() {
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
     queryFn: () => getJob(jobId),
-    refetchInterval: (q) => usePollWhileRunning(q.state.data as Job | undefined),
+    // SSE drives fast invalidation; keep a slow fallback for reconnect gaps.
+    refetchInterval: 10_000,
   });
   const job = jobQuery.data;
+
+  const isLive = job?.status === "pending" || job?.status === "running";
+  useJobEvents(
+    jobId,
+    isLive ?? false,
+    () => qc.invalidateQueries({ queryKey: ["job", jobId] }),
+    () => {
+      qc.invalidateQueries({ queryKey: ["job", jobId] });
+      qc.invalidateQueries({ queryKey: ["edl", jobId] });
+    },
+  );
 
   const edlPreset = resolvePreset(job?.config?.preset, preset);
   const edlQuery = useQuery({

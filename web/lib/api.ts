@@ -113,6 +113,9 @@ export const patchJobLabel = (id: string, label: string | null) =>
     body: JSON.stringify({ label }),
   });
 
+/** URL for the SSE stream of a job's progress events. */
+export const jobEventsUrl = (id: string) => `${BASE}/jobs/${id}/events`;
+
 // ---------------------------------------------------------------------------
 // EDL review + segment override
 // ---------------------------------------------------------------------------
