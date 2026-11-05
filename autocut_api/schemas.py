@@ -118,6 +118,16 @@ class SegmentUpdate(BaseModel):
     decision: str   # "keep" or "cut"
 
 
+class BatchSegmentItem(BaseModel):
+    index: int
+    decision: str
+
+
+class BatchSegmentUpdate(BaseModel):
+    """PATCH /segments body — apply multiple overrides in one call."""
+    updates: list[BatchSegmentItem]
+
+
 class WordUpdate(BaseModel):
     """PATCH body for correcting a single transcript word's text."""
     word: str

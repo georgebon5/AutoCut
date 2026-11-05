@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session
 from autocut.edl import edl_to_dict, load_edl, save_edl
 from autocut_api.dependencies import get_db
 from autocut_api.models import Job, SegmentOverride
-from autocut_api.schemas import SegmentResponse, SegmentUpdate, WordResponse, WordUpdate
+from autocut_api.schemas import (
+    BatchSegmentUpdate,
+    SegmentResponse,
+    SegmentUpdate,
+    WordResponse,
+    WordUpdate,
+)
 
 router = APIRouter(prefix="/jobs", tags=["edl"])
 
@@ -164,6 +170,84 @@ def patch_segment(
         reasons=seg.reasons,
         features=seg.features,
     )
+
+
+@router.patch("/{job_id}/segments", response_model=list[SegmentResponse])
+def batch_patch_segments(
+    request: Request,
+    job_id: str,
+    update: BatchSegmentUpdate,
+    preset: str | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> list[SegmentResponse]:
+    """Apply multiple keep/cut overrides atomically (Keep All / Cut All / Invert).
+
+    Loads the EDL once, applies every update, and saves once — far cheaper
+    than N individual PATCHes. Logs one SegmentOverride per changed segment.
+    """
+    for item in update.updates:
+        if item.decision not in _VALID_DECISIONS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"decision must be one of {list(_VALID_DECISIONS)}",
+            )
+
+    job = get_done_job(session, job_id)
+    preset_label, path = resolve_edl(job, preset)
+    edl = load_edl(path)
+
+    results: list[SegmentResponse] = []
+    for item in update.updates:
+        if item.index < 0 or item.index >= len(edl.segments):
+            raise HTTPException(
+                status_code=400,
+                detail=f"segment index {item.index} out of range [0, {len(edl.segments)})",
+            )
+        seg = edl.segments[item.index]
+
+        session.add(SegmentOverride(
+            job_id=job.id,
+            preset=preset_label,
+            segment_index=item.index,
+            clip_id=seg.clip_id,
+            segment_start=seg.start,
+            segment_end=seg.end,
+            previous_decision=seg.decision,
+            new_decision=item.decision,
+            interest_score=seg.interest_score,
+            features_json=json.dumps(seg.features),
+        ))
+
+        seg.decision = item.decision   # type: ignore[assignment]
+        seg.decision_source = "user"
+        seg.reasons.append(f"user {item.decision}")
+
+        results.append(SegmentResponse(
+            index=item.index,
+            clip_id=seg.clip_id,
+            start=seg.start,
+            end=seg.end,
+            duration=seg.duration,
+            decision=seg.decision,
+            decision_source=seg.decision_source,
+            interest_score=seg.interest_score,
+            reasons=seg.reasons,
+            features=seg.features,
+        ))
+
+    save_edl(edl, path)
+    session.commit()
+
+    override_count = session.scalar(
+        select(func.count()).select_from(SegmentOverride)
+    ) or 0
+    cfg = getattr(request.app.state, "config", None)
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if cfg is not None and session_factory is not None:
+        from autocut_api.routes.train import maybe_auto_train
+        maybe_auto_train(override_count, session_factory, cfg)
+
+    return results
 
 
 # Keep caption lines sane — mis-paste of a whole paragraph into one word

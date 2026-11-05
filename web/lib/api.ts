@@ -139,6 +139,22 @@ export const patchSegment = (
   });
 };
 
+export const batchPatchSegments = (
+  jobId: string,
+  updates: Array<{ index: number; decision: import("./api.types").Decision }>,
+  preset?: string,
+) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return request<import("./api.types").SegmentResponse[]>(
+    `/jobs/${jobId}/segments${q}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ updates }),
+    },
+  );
+};
+
 export const patchWord = (
   jobId: string,
   clipId: string,

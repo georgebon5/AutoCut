@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiError, getWaveform } from "@/lib/api";
+import { useBatchToggle } from "@/lib/use-batch-toggle";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import type { Clip, Decision, Edl, SegmentDict } from "@/lib/api.types";
 
@@ -27,6 +28,17 @@ interface Props {
 
 export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
+
+  // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
+  // replay it. Using a ref avoids stale-closure issues in event handlers;
+  // undoCount is a plain state integer used only to trigger re-renders.
+  const undoStackRef = useRef<Array<{ index: number; prev: Decision }>>([]);
+  const [undoCount, setUndoCount] = useState(0);
+
+  const pushUndo = useCallback((index: number, prev: Decision) => {
+    undoStackRef.current.push({ index, prev });
+    setUndoCount((c) => c + 1);
+  }, []);
 
   // Build a map from segment index → output_start for instant seek-to-segment.
   const outputStartBySegment = useMemo(() => {
@@ -52,6 +64,7 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
   }, [edl.segments]);
 
   const toggleMut = useSegmentToggle(jobId, preset);
+  const batchMut = useBatchToggle(jobId, preset);
 
   const stats = useMemo(() => summarise(edl.segments), [edl.segments]);
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
@@ -61,6 +74,15 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
     const t = outputStartBySegment.get(index);
     if (t !== undefined) onSeekRequest?.(t);
   };
+
+  // Undo: pop from stack and restore previous decision.
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const entry = undoStackRef.current.pop()!;
+    setUndoCount((c) => c - 1);
+    toggleMut.mutate({ index: entry.index, decision: entry.prev });
+    onDirty?.();
+  }, [toggleMut, onDirty]);
 
   // Keyboard shortcuts for high-volume editing. Skip when the user is typing
   // in an input/button/link so word-edits and buttons keep their keystrokes.
@@ -79,10 +101,20 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
       ) return;
       if (document.visibilityState !== "visible" || !document.hasFocus()) return;
 
+      // Ctrl/Cmd+Z: undo last toggle.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      // Modifier keys guard — don't intercept Ctrl+J etc.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
       const total = edl.segments.length;
       if (total === 0) return;
 
-      // j/k navigate; d/x/Delete/Backspace toggle keep/cut of current.
+      // j/l navigate; d/x/Delete/Backspace toggle keep/cut of current.
       if (e.key === "j" || e.key === "J" || e.key === "ArrowLeft") {
         e.preventDefault();
         setSelected((s) => {
@@ -109,17 +141,27 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         if (!seg) return;
         e.preventDefault();
         const next: Decision = seg.decision === "keep" ? "cut" : "keep";
+        pushUndo(selected, seg.decision as Decision);
         toggleMut.mutate({ index: selected, decision: next });
         onDirty?.();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, selected, toggleMut, onDirty]);
+  }, [edl.segments, selected, toggleMut, onDirty, handleUndo, pushUndo]);
 
   return (
     <section className="flex flex-col gap-4">
-      <StatsBar stats={stats} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <StatsBar stats={stats} />
+        <BulkActions
+          segments={edl.segments}
+          batchMut={batchMut}
+          undoCount={undoCount}
+          onUndo={handleUndo}
+          onDirty={onDirty}
+        />
+      </div>
 
       <div className="glass-card overflow-x-auto rounded-2xl">
         <div className="flex min-w-full flex-col divide-y divide-white/5">
@@ -132,6 +174,8 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
               selectedIndex={selected}
               onSelect={selectAndSeek}
               onToggle={(index, decision) => {
+                const seg = edl.segments[index];
+                if (seg) pushUndo(index, seg.decision as Decision);
                 toggleMut.mutate({ index, decision });
                 onDirty?.();
               }}
@@ -140,9 +184,9 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         </div>
       </div>
 
-      {toggleMut.isError ? (
+      {(toggleMut.isError || batchMut.isError) ? (
         <p className="text-sm text-red-400">
-          {(toggleMut.error as ApiError | Error).message}
+          {((toggleMut.error ?? batchMut.error) as ApiError | Error).message}
         </p>
       ) : null}
 
@@ -160,6 +204,7 @@ export default function Timeline({ jobId, preset, edl, onDirty, onSeekRequest }:
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">J</kbd>
         /<kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">L</kbd> πλοήγηση ·{" "}
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">D</kbd> κόψε/κράτα ·{" "}
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Z</kbd> undo ·{" "}
         <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px]">Space</kbd> play/pause
       </p>
     </section>
@@ -397,6 +442,92 @@ function SegmentDetail({ index, seg }: { index: number; seg: SegmentDict }) {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+
+function BulkActions({
+  segments,
+  batchMut,
+  undoCount,
+  onUndo,
+  onDirty,
+}: {
+  segments: SegmentDict[];
+  batchMut: ReturnType<typeof useBatchToggle>;
+  undoCount: number;
+  onUndo: () => void;
+  onDirty?: () => void;
+}) {
+  const busy = batchMut.isPending;
+
+  const apply = (updates: Array<{ index: number; decision: Decision }>) => {
+    if (updates.length === 0) return;
+    batchMut.mutate(updates);
+    onDirty?.();
+  };
+
+  const cls =
+    "rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/60 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30";
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          apply(
+            segments.flatMap((s, i) =>
+              s.decision !== "keep" ? [{ index: i, decision: "keep" as Decision }] : [],
+            ),
+          )
+        }
+        className={cls}
+        title="Κράτα όλα τα κομμάτια"
+      >
+        Κράτα όλα
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          apply(
+            segments.flatMap((s, i) =>
+              s.decision !== "cut" ? [{ index: i, decision: "cut" as Decision }] : [],
+            ),
+          )
+        }
+        className={cls}
+        title="Κόψε όλα τα κομμάτια"
+      >
+        Κόψε όλα
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          apply(
+            segments.map((s, i) => ({
+              index: i,
+              decision: (s.decision === "keep" ? "cut" : "keep") as Decision,
+            })),
+          )
+        }
+        className={cls}
+        title="Αντιστρέψε όλες τις επιλογές"
+      >
+        Αντιστροφή
+      </button>
+      <button
+        type="button"
+        disabled={undoCount === 0 || busy}
+        onClick={onUndo}
+        className={cls}
+        title="Undo τελευταία αλλαγή (Ctrl+Z)"
+      >
+        ↩{undoCount > 0 ? ` (${undoCount})` : ""}
+      </button>
     </div>
   );
 }
