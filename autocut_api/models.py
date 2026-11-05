@@ -46,6 +46,9 @@ class Job(Base):
     # row makes jobs self-describing and reruns trivial.
     config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional human-readable name set by the user after job creation.
+    label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow_naive, nullable=False
     )

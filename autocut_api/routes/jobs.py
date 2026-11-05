@@ -20,7 +20,7 @@ from autocut.pipeline import PipelineError, PipelineOptions, validate_options
 from autocut_api.config import ApiConfig
 from autocut_api.dependencies import get_config, get_db
 from autocut_api.models import Job, SegmentOverride, Upload
-from autocut_api.schemas import JobCreateRequest, JobResponse
+from autocut_api.schemas import JobCreateRequest, JobPatchRequest, JobResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -93,6 +93,7 @@ def _job_response(job: Job) -> JobResponse:
         error=job.error,
         workspace=job.workspace,
         config=config,
+        label=job.label,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
@@ -200,6 +201,24 @@ def get_job(job_id: str, session: Session = Depends(get_db)) -> JobResponse:
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+    return _job_response(job)
+
+
+@router.patch("/{job_id}", response_model=JobResponse)
+def patch_job(
+    job_id: str,
+    body: JobPatchRequest,
+    session: Session = Depends(get_db),
+) -> JobResponse:
+    """Update mutable user-facing fields (currently: label)."""
+    job = session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if body.label is not None:
+        stripped = body.label.strip()
+        job.label = stripped if stripped else None
+    session.commit()
+    session.refresh(job)
     return _job_response(job)
 
 

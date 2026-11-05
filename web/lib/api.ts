@@ -106,6 +106,13 @@ export const getJob = (id: string) => request<Job>(`/jobs/${id}`);
 export const deleteJob = (id: string) =>
   request<void>(`/jobs/${id}`, { method: "DELETE", expectJson: false });
 
+export const patchJobLabel = (id: string, label: string | null) =>
+  request<Job>(`/jobs/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+
 // ---------------------------------------------------------------------------
 // EDL review + segment override
 // ---------------------------------------------------------------------------

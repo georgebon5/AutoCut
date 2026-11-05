@@ -3,14 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import CaptionStylePicker from "@/components/caption-style-picker";
 import DownloadsPanel from "@/components/downloads-panel";
 import PreviewPlayer from "@/components/preview-player";
 import Timeline from "@/components/timeline";
 import Transcript from "@/components/transcript";
-import { ApiError, getEdl, getJob, postRender } from "@/lib/api";
+import { ApiError, getEdl, getJob, patchJobLabel, postRender } from "@/lib/api";
 import type { CaptionStyle, Job, JobConfig } from "@/lib/api.types";
 import { usePersistedState } from "@/lib/use-persisted-state";
 
@@ -60,6 +60,8 @@ export default function ReviewPage() {
   const [seekRequest, setSeekRequest] = useState<{ time: number; seq: number } | undefined>();
   const seekSeq = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
   // Reset dirty when the user switches preset — each preset has its own EDL
   // + rendered mp4, so dirty-against-preset-A doesn't apply to preset B.
   useEffect(() => {
@@ -82,6 +84,19 @@ export default function ReviewPage() {
     staleTime: 0,
   });
 
+  const labelMut = useMutation({
+    mutationFn: (next: string | null) => patchJobLabel(jobId, next),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["job", jobId] }),
+  });
+
+  const commitLabel = useCallback(() => {
+    setEditingLabel(false);
+    const trimmed = labelDraft.trim();
+    const current = job?.label ?? "";
+    if (trimmed === current) return;
+    labelMut.mutate(trimmed || null);
+  }, [labelDraft, job?.label, labelMut]);
+
   const renderMut = useMutation({
     mutationFn: () =>
       postRender(jobId, edlPreset ?? undefined, {
@@ -102,19 +117,59 @@ export default function ReviewPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-12">
       <header className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <Link
             href="/"
             className="text-xs font-medium uppercase tracking-[0.2em] text-white/40 transition hover:text-white/70"
           >
             ← Jobs
           </Link>
-          <h1 className="mt-2 bg-gradient-to-br from-white to-white/60 bg-clip-text text-2xl font-light tracking-tight text-transparent">
-            Έλεγχος <span className="font-mono text-lg text-white/40">· {jobId.slice(0, 8)}</span>
-          </h1>
+          {/* Inline-editable label */}
+          <div className="mt-2">
+            {editingLabel ? (
+              <input
+                autoFocus
+                type="text"
+                maxLength={120}
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitLabel(); }
+                  if (e.key === "Escape") { e.preventDefault(); setEditingLabel(false); }
+                }}
+                onBlur={commitLabel}
+                placeholder="Πρόσθεσε τίτλο…"
+                className="w-full max-w-xs rounded-xl border border-cyan-400/40 bg-black/40 px-3 py-1.5 text-xl font-light text-white/90 outline-none placeholder-white/20 focus:border-cyan-400/70"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setLabelDraft(job?.label ?? ""); setEditingLabel(true); }}
+                className="group flex items-center gap-2 text-left"
+                title="Κλικ για επεξεργασία τίτλου"
+              >
+                {job?.label ? (
+                  <h1 className="bg-gradient-to-br from-white to-white/60 bg-clip-text text-2xl font-light tracking-tight text-transparent">
+                    {job.label}
+                  </h1>
+                ) : (
+                  <h1 className="text-2xl font-light tracking-tight text-white/90">
+                    Έλεγχος{" "}
+                    <span className="font-mono text-lg text-white/40">· {jobId.slice(0, 8)}</span>
+                  </h1>
+                )}
+                <span className="text-xs text-white/20 opacity-0 transition group-hover:opacity-100">
+                  ✎
+                </span>
+              </button>
+            )}
+          </div>
           {job ? (
             <p className="mt-1 text-xs text-white/40">
               {STATUS_LABEL[job.status]} · {job.stage}
+              {job.label ? (
+                <span className="ml-2 font-mono text-white/25">{jobId.slice(0, 8)}</span>
+              ) : null}
             </p>
           ) : null}
           {job?.config?.model_used ? (

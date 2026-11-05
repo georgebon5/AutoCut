@@ -2,9 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-import { ApiError, deleteJob, getTrainStatus, listJobs, triggerTrain } from "@/lib/api";
+import { ApiError, deleteJob, getTrainStatus, listJobs, patchJobLabel, triggerTrain } from "@/lib/api";
 import type { Job, TrainStatus } from "@/lib/api.types";
 
 /** Only running jobs need live polling; terminal jobs are checked less often. */
@@ -67,27 +67,72 @@ export default function HomePage() {
 function JobRow({ job }: { job: Job }) {
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState(false);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(job.label ?? "");
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
 
   const removeMut = useMutation({
     mutationFn: () => deleteJob(job.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 
+  const labelMut = useMutation({
+    mutationFn: (next: string | null) => patchJobLabel(job.id, next),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
+
+  const commitLabel = () => {
+    setEditingLabel(false);
+    const trimmed = labelDraft.trim();
+    const current = job.label ?? "";
+    if (trimmed === current) return;
+    labelMut.mutate(trimmed || null);
+  };
+
   const pct = Math.round(job.progress * 100);
   const canDelete = job.status === "done" || job.status === "failed";
 
   const inner = (
     <div className="glass-card rounded-2xl p-5 transition hover:border-white/15 hover:bg-white/[0.05]">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-mono text-sm tracking-tight text-white/90" title={job.id}>
-            {job.id.slice(0, 8)}<span className="text-white/30">…</span>
-          </p>
-          <p className="mt-0.5 text-xs text-white/40">
-            {job.stage} · {new Date(job.created_at).toLocaleString()}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {editingLabel ? (
+            <input
+              ref={labelInputRef}
+              autoFocus
+              type="text"
+              maxLength={120}
+              value={labelDraft}
+              onChange={(e) => setLabelDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitLabel(); }
+                if (e.key === "Escape") { e.preventDefault(); setEditingLabel(false); setLabelDraft(job.label ?? ""); }
+              }}
+              onBlur={commitLabel}
+              onClick={(e) => e.preventDefault()}
+              placeholder="Πρόσθεσε τίτλο…"
+              className="w-full rounded-lg border border-cyan-400/40 bg-black/40 px-2 py-0.5 text-sm text-white/90 outline-none placeholder-white/25 focus:border-cyan-400/70"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); setEditingLabel(true); setLabelDraft(job.label ?? ""); }}
+              className="group flex items-center gap-1.5 text-left"
+              title="Κλικ για επεξεργασία τίτλου"
+            >
+              {job.label ? (
+                <span className="truncate text-sm font-medium text-white/90">{job.label}</span>
+              ) : (
+                <span className="text-sm text-white/25 opacity-0 transition group-hover:opacity-100">+ τίτλος</span>
+              )}
+            </button>
+          )}
+          <p className="mt-0.5 font-mono text-xs text-white/35" title={job.id}>
+            {job.id.slice(0, 8)}<span className="text-white/20">…</span>
+            <span className="ml-2 not-italic text-white/30">{job.stage}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {job.config?.model_used ? <MlBadge /> : null}
           <StatusChip status={job.status} />
           {canDelete ? (
@@ -122,8 +167,6 @@ function JobRow({ job }: { job: Job }) {
     </div>
   );
 
-  // Only completed jobs have an EDL to review; link only then so stale
-  // navigation into an unfinished job can't happen.
   if (job.status === "done") {
     return (
       <li>

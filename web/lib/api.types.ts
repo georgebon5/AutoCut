@@ -38,6 +38,7 @@ export interface Job {
   stage: string;
   progress: number;     // 0..1
   error: string | null;
+  label?: string | null;
   workspace: string | null;
   config: JobConfig | null;
   created_at: string;   // ISO 8601

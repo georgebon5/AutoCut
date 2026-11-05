@@ -26,8 +26,14 @@ class JobResponse(BaseModel):
     error: str | None
     workspace: str | None
     config: dict | None
+    label: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobPatchRequest(BaseModel):
+    """PATCH /jobs/{id} body — only the mutable user-facing fields."""
+    label: str | None = None
 
 
 class JobCreateRequest(BaseModel):
