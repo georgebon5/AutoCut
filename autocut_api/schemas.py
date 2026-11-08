@@ -236,6 +236,13 @@ class SplitResponse(BaseModel):
     second: SegmentResponse
 
 
+class CutWordRequest(BaseModel):
+    """POST /words/cut body — atomically isolates a word's time range and cuts it."""
+    clip_id: str
+    start: float   # word start in source seconds
+    end: float     # word end in source seconds
+
+
 class RenderRequest(BaseModel):
     """Optional POST body carrying style overrides for a re-render.
 

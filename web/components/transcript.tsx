@@ -1,9 +1,11 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
+import { useWordCut } from "@/lib/use-word-cut";
 import { useWordEdit } from "@/lib/use-word-edit";
 import type { Decision, Edl, SegmentDict, Transcript as TranscriptT, WordTimestamp } from "@/lib/api.types";
 
@@ -95,13 +97,21 @@ function findContainingSegment(
 }
 
 
-type Mode = "toggle" | "edit";
+type WordMenu = {
+  clipId: string;
+  wordIndex: number;
+  word: WordTimestamp;
+  segIndex: number;
+  x: number;
+  y: number;
+};
 
 export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty, currentTime, onSeekRequest }: Props) {
   const toggleMut = useSegmentToggle(jobId, preset);
   const editMut = useWordEdit(jobId, preset);
-  const [mode, setMode] = useState<Mode>("toggle");
+  const cutMut = useWordCut(jobId, preset);
   const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
+  const [wordMenu, setWordMenu] = useState<WordMenu | null>(null);
 
   // ── Search state ──────────────────────────────────────────────────────────
   const [showSearch, setShowSearch] = useState(false);
@@ -178,6 +188,19 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   // Reset match index when query changes.
   useEffect(() => { setActiveMatchIdx(0); }, [searchQuery]);
 
+  // Close word menu on click-outside or Escape.
+  useEffect(() => {
+    if (!wordMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setWordMenu(null); };
+    const onClick = () => setWordMenu(null);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("click", onClick, { capture: true });
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("click", onClick, { capture: true });
+    };
+  }, [wordMenu]);
+
   // Group assignments by clip for display, preserving transcript word order.
   const groupedByClip = useMemo(() => {
     const assignments = buildWordToSegment(edl);
@@ -209,16 +232,11 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     onDirty?.();
   };
 
-  const headerHint =
-    mode === "edit"
-      ? "Κείμενο · πάτα μία λέξη για να τη διορθώσεις"
-      : "Κείμενο · πάτα μία λέξη για να κόψεις/κρατήσεις το κομμάτι της";
-
   return (
     <section className="flex flex-col gap-3" data-transcript>
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
-          {headerHint}
+          Κείμενο · κλικ σε λέξη για επεξεργασία ή κοπή
         </h2>
         <div className="flex items-center gap-2">
           <button
@@ -234,7 +252,6 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
           >
             ⌕
           </button>
-          <ModeToggle value={mode} onChange={(m) => { setMode(m); setEditing(null); }} />
         </div>
       </div>
 
@@ -261,29 +278,56 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             activeWord={activeWord}
             searchQuery={searchQuery}
             currentMatchKey={currentMatchKey}
-            mode={mode}
             editing={editing}
-            onStartEdit={(clipId, wordIndex) => setEditing({ clipId, wordIndex })}
             onCommitEdit={commitEdit}
             onCancelEdit={() => setEditing(null)}
             onSeekToWord={(clipId, sourceTime) => {
               const ot = sourceToOutput(clipId, sourceTime, edl);
               if (ot !== null) onSeekRequest?.(ot);
             }}
-            onSelect={(i) => {
-              onSelect?.(i);
-              const seg = edl.segments[i];
-              if (seg) {
-                toggleMut.mutate({
-                  index: i,
-                  decision: flip(seg.decision),
-                });
-                onDirty?.();
-              }
+            onWordClick={(a, x, y) => {
+              // Seek + select segment on every word click.
+              const ot = sourceToOutput(a.clipId, a.word.start, edl);
+              if (ot !== null) onSeekRequest?.(ot);
+              onSelect?.(a.segIndex);
+              // Open the action menu.
+              setWordMenu({ clipId: a.clipId, wordIndex: a.wordIndex, word: a.word, segIndex: a.segIndex, x, y });
             }}
           />
         ))}
       </div>
+
+      {/* Word action popover — rendered in a portal to avoid overflow/z-index issues */}
+      {wordMenu && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-white/10 bg-black/90 shadow-xl backdrop-blur-sm"
+          style={{ left: wordMenu.x, top: wordMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="px-4 py-2 text-left text-xs text-white/80 transition hover:bg-white/8 hover:text-white"
+            onClick={() => {
+              setEditing({ clipId: wordMenu.clipId, wordIndex: wordMenu.wordIndex });
+              setWordMenu(null);
+            }}
+          >
+            ✏ Επεξεργασία κειμένου
+          </button>
+          <button
+            type="button"
+            className="px-4 py-2 text-left text-xs text-red-300/80 transition hover:bg-red-500/10 hover:text-red-200"
+            onClick={() => {
+              cutMut.mutate({ clipId: wordMenu.clipId, start: wordMenu.word.start, end: wordMenu.word.end });
+              setWordMenu(null);
+              onDirty?.();
+            }}
+          >
+            ✂ Κόψε από βίντεο
+          </button>
+        </div>,
+        document.body,
+      )}
 
       {toggleMut.isError ? (
         <p className="text-sm text-red-400">
@@ -389,36 +433,6 @@ function SearchBar({
 }
 
 
-function ModeToggle({ value, onChange }: { value: Mode; onChange: (m: Mode) => void }) {
-  return (
-    <div className="inline-flex shrink-0 gap-1 rounded-xl border border-white/10 bg-black/30 p-0.5 text-xs">
-      <button
-        type="button"
-        onClick={() => onChange("toggle")}
-        className={`rounded-lg px-3 py-1 transition ${
-          value === "toggle"
-            ? "btn-primary-gradient font-semibold"
-            : "text-white/60 hover:bg-white/5 hover:text-white"
-        }`}
-      >
-        Κόψιμο
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange("edit")}
-        className={`rounded-lg px-3 py-1 transition ${
-          value === "edit"
-            ? "bg-cyan-400 font-semibold text-cyan-950"
-            : "text-white/60 hover:bg-white/5 hover:text-white"
-        }`}
-      >
-        Διόρθωση κειμένου
-      </button>
-    </div>
-  );
-}
-
-
 function ClipTranscript({
   transcript,
   segments,
@@ -427,13 +441,11 @@ function ClipTranscript({
   activeWord,
   searchQuery,
   currentMatchKey,
-  mode,
   editing,
-  onStartEdit,
   onCommitEdit,
   onCancelEdit,
   onSeekToWord,
-  onSelect,
+  onWordClick,
 }: {
   transcript: TranscriptT;
   segments: SegmentDict[];
@@ -442,13 +454,11 @@ function ClipTranscript({
   activeWord: { clipId: string; wordIndex: number } | null;
   searchQuery: string;
   currentMatchKey: string | null;
-  mode: Mode;
   editing: { clipId: string; wordIndex: number } | null;
-  onStartEdit: (clipId: string, wordIndex: number) => void;
   onCommitEdit: (clipId: string, wordIndex: number, next: string) => void;
   onCancelEdit: () => void;
   onSeekToWord: (clipId: string, sourceTime: number) => void;
-  onSelect: (segIndex: number) => void;
+  onWordClick: (a: WordAssignment, x: number, y: number) => void;
 }) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLButtonElement | null>(null);
@@ -504,13 +514,11 @@ function ClipTranscript({
               key={i}
               ref={isPlaying ? activeRef : isCurrentMatch ? searchRef : undefined}
               type="button"
-              onClick={() => {
-                if (mode === "edit") {
-                  onStartEdit(a.clipId, a.wordIndex);
-                } else {
-                  onSeekToWord(a.clipId, a.word.start);
-                  onSelect(a.segIndex);
-                }
+              onClick={(e) => {
+                e.stopPropagation();
+                onSeekToWord(a.clipId, a.word.start);
+                const rect = e.currentTarget.getBoundingClientRect();
+                onWordClick(a, rect.left, rect.bottom + 4);
               }}
               className={[
                 "inline rounded px-0.5 transition",
@@ -524,7 +532,6 @@ function ClipTranscript({
                   : isMatch
                   ? "bg-fuchsia-400/15 text-fuchsia-200"
                   : "",
-                mode === "edit" ? "cursor-text hover:bg-cyan-400/20" : "",
               ].join(" ")}
             >
               {a.word.word.trim()}

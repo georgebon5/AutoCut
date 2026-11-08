@@ -305,3 +305,25 @@ export const getTrainStatus = () => request<TrainStatus>("/train/status");
 
 export const triggerTrain = () =>
   request<TrainResult>("/train", { method: "POST" });
+
+// ---------------------------------------------------------------------------
+// Word cut — isolate a word's time range and mark it cut
+// ---------------------------------------------------------------------------
+
+export const cutWord = (
+  jobId: string,
+  clipId: string,
+  start: number,
+  end: number,
+  preset?: string,
+) => {
+  const q = preset ? `?preset=${encodeURIComponent(preset)}` : "";
+  return request<{ ok: boolean; already_cut: boolean }>(
+    `/jobs/${jobId}/words/cut${q}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clip_id: clipId, start, end }),
+    },
+  );
+};

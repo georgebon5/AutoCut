@@ -22,6 +22,7 @@ from autocut_api.dependencies import get_db
 from autocut_api.models import Job, SegmentOverride
 from autocut_api.schemas import (
     BatchSegmentUpdate,
+    CutWordRequest,
     MergeResponse,
     SegmentResponse,
     SegmentUpdate,
@@ -526,3 +527,78 @@ def patch_word(
         start=w.start,
         end=w.end,
     )
+
+
+@router.post("/{job_id}/words/cut")
+def cut_word(
+    job_id: str,
+    body: CutWordRequest,
+    preset: str | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> dict:
+    """Isolate a word's time range and mark it cut.
+
+    Finds the segment containing [body.start, body.end] on body.clip_id.
+    Splits at the word boundaries (skipped when the word already touches the
+    segment edge) so the word becomes its own segment, then sets that segment
+    to ``decision="cut"``.  All indices shift — the client must refetch the EDL.
+    """
+    job = get_done_job(session, job_id)
+    _, path = resolve_edl(job, preset)
+    edl = load_edl(path)
+
+    clip_id = body.clip_id
+    ws = float(body.start)
+    we = float(body.end)
+
+    # Find the segment that fully contains the word range.
+    target_idx: int | None = None
+    for i, seg in enumerate(edl.segments):
+        if seg.clip_id == clip_id and seg.start <= ws + 0.001 and seg.end >= we - 0.001:
+            target_idx = i
+            break
+
+    if target_idx is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"word range [{ws:.3f}, {we:.3f}] not contained in any segment of clip {clip_id!r}",
+        )
+
+    seg = edl.segments[target_idx]
+    if seg.decision == "cut":
+        return {"ok": True, "already_cut": True}
+
+    def _split(idx: int, at: float) -> int:
+        """Split segment at idx at time `at`; return index of the right half."""
+        s = edl.segments[idx]
+        left = _Segment(
+            clip_id=s.clip_id, start=s.start, end=at,
+            features=dict(s.features), interest_score=s.interest_score,
+            decision=s.decision, decision_source=s.decision_source,
+            reasons=list(s.reasons), notes=s.notes,
+        )
+        right = _Segment(
+            clip_id=s.clip_id, start=at, end=s.end,
+            features=dict(s.features), interest_score=s.interest_score,
+            decision=s.decision, decision_source=s.decision_source,
+            reasons=list(s.reasons), notes=s.notes,
+        )
+        edl.segments = edl.segments[:idx] + [left, right] + edl.segments[idx + 1:]
+        return idx + 1
+
+    # Split at word start if not at the segment boundary.
+    if ws > seg.start + _MIN_SEGMENT_DURATION:
+        target_idx = _split(target_idx, ws)
+        seg = edl.segments[target_idx]
+
+    # Split at word end if not at the (possibly updated) segment boundary.
+    if we < seg.end - _MIN_SEGMENT_DURATION:
+        _split(target_idx, we)
+        # target_idx still points to the [ws, we] segment
+
+    edl.segments[target_idx].decision = "cut"           # type: ignore[assignment]
+    edl.segments[target_idx].decision_source = "user"   # type: ignore[assignment]
+    edl.segments[target_idx].reasons.append("word cut")
+
+    save_edl(edl, path)
+    return {"ok": True, "already_cut": False}
