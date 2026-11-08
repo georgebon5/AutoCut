@@ -2,20 +2,65 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { ApiError, deleteJob, getTrainStatus, listJobs, patchJobLabel, triggerTrain } from "@/lib/api";
 import { useJobEvents } from "@/lib/use-job-events";
 import type { Job, TrainStatus } from "@/lib/api.types";
 
+type StatusFilter = "all" | "active" | "done" | "failed";
+
 export default function HomePage() {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: listJobs,
-    // SSE streams in each live JobRow drive fast invalidation; this is a
-    // slow safety-net refetch in case a stream drops or we miss an event.
     refetchInterval: 10_000,
   });
+
+  const allJobs = jobs.data ?? [];
+
+  const filteredJobs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allJobs.filter((j) => {
+      if (statusFilter === "active" && j.status !== "pending" && j.status !== "running") return false;
+      if (statusFilter === "done" && j.status !== "done") return false;
+      if (statusFilter === "failed" && j.status !== "failed") return false;
+      if (!q) return true;
+      return (
+        j.label?.toLowerCase().includes(q) ||
+        j.id.toLowerCase().startsWith(q)
+      );
+    });
+  }, [allJobs, search, statusFilter]);
+
+  const finishedCount = allJobs.filter(
+    (j) => j.status === "done" || j.status === "failed",
+  ).length;
+
+  const bulkDeleteMut = useMutation({
+    mutationFn: () =>
+      Promise.all(
+        allJobs
+          .filter((j) => j.status === "done" || j.status === "failed")
+          .map((j) => deleteJob(j.id)),
+      ),
+    onSuccess: () => {
+      setBulkConfirm(false);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+
+  const statusTabs: { f: StatusFilter; label: string }[] = [
+    { f: "all",    label: "Όλα" },
+    { f: "active", label: "Ενεργά" },
+    { f: "done",   label: "Ολοκλ." },
+    { f: "failed", label: "Απέτ." },
+  ];
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-8 px-4 py-14">
@@ -35,24 +80,103 @@ export default function HomePage() {
       <IntelligencePanel />
 
       <section>
-        <h2 className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
-          Jobs
-        </h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+            Jobs
+          </h2>
+          {finishedCount > 0 && (
+            <span className="flex items-center gap-1.5">
+              {bulkConfirm ? (
+                <>
+                  <span className="text-xs text-white/50">Σβήνεις {finishedCount};</span>
+                  <button
+                    type="button"
+                    disabled={bulkDeleteMut.isPending}
+                    onClick={() => bulkDeleteMut.mutate()}
+                    className="rounded-md bg-red-500/80 px-2 py-0.5 text-xs font-medium text-red-950 transition hover:bg-red-400"
+                  >
+                    {bulkDeleteMut.isPending ? "…" : "ναι"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkConfirm(false)}
+                    className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-white/50 transition hover:border-white/20"
+                  >
+                    άκυρο
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setBulkConfirm(true)}
+                  className="rounded-md border border-white/8 px-2 py-0.5 text-[11px] text-white/35 transition hover:border-red-500/30 hover:text-red-300/70"
+                >
+                  σβήσε ολοκληρωμένα ({finishedCount})
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+
+        {/* Search + status filter */}
+        {allJobs.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[160px]">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Αναζήτηση…"
+                className="w-full rounded-lg border border-white/8 bg-white/5 py-1 pl-3 pr-7 text-xs text-white/80 placeholder:text-white/25 focus:border-cyan-500/40 focus:outline-none"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70"
+                  aria-label="Καθαρισμός"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <div className="inline-flex gap-0.5 rounded-lg border border-white/8 bg-black/20 p-0.5">
+              {statusTabs.map(({ f, label }) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setStatusFilter(f)}
+                  className={[
+                    "rounded-md px-2.5 py-0.5 text-[11px] font-medium transition",
+                    statusFilter === f
+                      ? "bg-white/12 text-white/90"
+                      : "text-white/40 hover:text-white/70",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {jobs.isLoading ? (
           <p className="text-sm text-white/40">Φόρτωση…</p>
         ) : jobs.isError ? (
           <p className="text-sm text-red-300">
             Δεν φορτώθηκαν τα jobs. Τρέχει το API;
           </p>
-        ) : jobs.data && jobs.data.length > 0 ? (
+        ) : filteredJobs.length > 0 ? (
           <ul className="flex flex-col gap-3">
-            {jobs.data.map((j) => (
+            {filteredJobs.map((j) => (
               <JobRow key={j.id} job={j} />
             ))}
           </ul>
+        ) : allJobs.length > 0 ? (
+          <p className="text-sm text-white/40">Κανένα job ταιριάζει.</p>
         ) : (
           <p className="text-sm text-white/40">
-            Κανένα job ακόμα. Πάτα “Ανέβασε clips” για να ξεκινήσεις.
+            Κανένα job ακόμα. Πάτα "Ανέβασε clips" για να ξεκινήσεις.
           </p>
         )}
       </section>
