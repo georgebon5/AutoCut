@@ -50,15 +50,18 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const scrollRef = useRef<HTMLDivElement>(null);
   const programScrollRef = useRef(false);
 
-  // Undo stack: each entry stores the decision BEFORE a toggle so Ctrl+Z can
-  // replay it. Using a ref avoids stale-closure issues in event handlers;
-  // undoCount is a plain state integer used only to trigger re-renders.
-  const undoStackRef = useRef<Array<{ index: number; prev: Decision }>>([]);
+  // Undo/redo stacks: each entry stores the decision before/after a toggle.
+  // Refs avoid stale-closure issues; *Count states are render triggers only.
+  const undoStackRef = useRef<Array<{ index: number; prev: Decision; next: Decision }>>([]);
+  const redoStackRef = useRef<Array<{ index: number; prev: Decision; next: Decision }>>([]);
   const [undoCount, setUndoCount] = useState(0);
+  const [redoCount, setRedoCount] = useState(0);
 
-  const pushUndo = useCallback((index: number, prev: Decision) => {
-    undoStackRef.current.push({ index, prev });
+  const pushUndo = useCallback((index: number, prev: Decision, next: Decision) => {
+    undoStackRef.current.push({ index, prev, next });
+    redoStackRef.current = [];   // new action clears redo
     setUndoCount((c) => c + 1);
+    setRedoCount(0);
   }, []);
 
   // Build a map from segment index → output_start for instant seek-to-segment.
@@ -175,12 +178,25 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     if (t !== undefined) onSeekRequest?.(t);
   };
 
-  // Undo: pop from stack and restore previous decision.
+  // Undo: pop from undo stack, restore previous decision, push to redo stack.
   const handleUndo = useCallback(() => {
     if (undoStackRef.current.length === 0) return;
     const entry = undoStackRef.current.pop()!;
+    redoStackRef.current.push(entry);
     setUndoCount((c) => c - 1);
+    setRedoCount((c) => c + 1);
     toggleMut.mutate({ index: entry.index, decision: entry.prev });
+    onDirty?.();
+  }, [toggleMut, onDirty]);
+
+  // Redo: pop from redo stack, replay the forward decision, push back to undo.
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const entry = redoStackRef.current.pop()!;
+    undoStackRef.current.push(entry);
+    setRedoCount((c) => c - 1);
+    setUndoCount((c) => c + 1);
+    toggleMut.mutate({ index: entry.index, decision: entry.next });
     onDirty?.();
   }, [toggleMut, onDirty]);
 
@@ -201,10 +217,10 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       ) return;
       if (document.visibilityState !== "visible" || !document.hasFocus()) return;
 
-      // Ctrl/Cmd+Z: undo last toggle.
+      // Ctrl/Cmd+Z: undo; Ctrl/Cmd+Shift+Z: redo.
       if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
-        handleUndo();
+        if (e.shiftKey) handleRedo(); else handleUndo();
         return;
       }
 
@@ -243,7 +259,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         if (!seg) return;
         e.preventDefault();
         const next: Decision = seg.decision === "keep" ? "cut" : "keep";
-        pushUndo(selected, seg.decision as Decision);
+        pushUndo(selected, seg.decision as Decision, next);
         toggleMut.mutate({ index: selected, decision: next });
         onDirty?.();
       } else if (e.key === "s" || e.key === "S") {
@@ -275,7 +291,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, pushUndo]);
+  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -304,7 +320,9 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
             segments={edl.segments}
             batchMut={batchMut}
             undoCount={undoCount}
+            redoCount={redoCount}
             onUndo={handleUndo}
+            onRedo={handleRedo}
             onDirty={onDirty}
           />
         </div>
@@ -371,7 +389,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
               onMerge={(index) => mergeMut.mutate({ index })}
               onToggle={(index, decision) => {
                 const seg = edl.segments[index];
-                if (seg) pushUndo(index, seg.decision as Decision);
+                if (seg) pushUndo(index, seg.decision as Decision, decision);
                 toggleMut.mutate({ index, decision });
                 onDirty?.();
               }}
@@ -654,6 +672,14 @@ function ClipRow({
                 >
                   {dur.toFixed(1)}s
                 </span>
+              ) : null}
+              {/* Note indicator dot */}
+              {seg.notes ? (
+                <span
+                  className="pointer-events-none absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-400/80"
+                  title="Έχει σημείωση"
+                  aria-hidden
+                />
               ) : null}
               {/* Trim handles — visible only on selected kept segments */}
               {active && keep ? (
@@ -946,13 +972,17 @@ function BulkActions({
   segments,
   batchMut,
   undoCount,
+  redoCount,
   onUndo,
+  onRedo,
   onDirty,
 }: {
   segments: SegmentDict[];
   batchMut: ReturnType<typeof useBatchToggle>;
   undoCount: number;
+  redoCount: number;
   onUndo: () => void;
+  onRedo: () => void;
   onDirty?: () => void;
 }) {
   const busy = batchMut.isPending;
@@ -1023,10 +1053,25 @@ function BulkActions({
       >
         ↩{undoCount > 0 ? ` (${undoCount})` : ""}
       </button>
+      <button
+        type="button"
+        disabled={redoCount === 0 || busy}
+        onClick={onRedo}
+        className={cls}
+        title="Redo (Ctrl+Shift+Z)"
+      >
+        ↪{redoCount > 0 ? ` (${redoCount})` : ""}
+      </button>
     </div>
   );
 }
 
+
+function fmtDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : `${s}s`;
+}
 
 function StatsBar({
   stats,
@@ -1041,10 +1086,20 @@ function StatsBar({
       <span className="font-medium text-white/80">
         {stats.keep} μέσα · {stats.cut} έξω
       </span>
-      <span className="font-mono">
-        {stats.keepSec.toFixed(1)}s από {totalSec.toFixed(1)}s ({pct}%)
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-cyan-300/80">{fmtDuration(stats.keepSec)}</span>
+        <span className="text-white/35">από {fmtDuration(totalSec)}</span>
+        <span
+          className={`rounded px-1 py-0.5 font-mono text-[10px] font-semibold ${
+            pct >= 70 ? "bg-emerald-500/15 text-emerald-300" :
+            pct >= 40 ? "bg-amber-500/15 text-amber-300" :
+                        "bg-red-500/15 text-red-300"
+          }`}
+        >
+          {pct}%
+        </span>
       </span>
-      <span className="text-white/35">· {total} κομμάτια σύνολο</span>
+      <span className="text-white/35">· {total} κομμάτια</span>
     </div>
   );
 }
@@ -1204,6 +1259,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["L", "→"],        desc: "Επόμενο segment" },
   { keys: ["D", "X"],        desc: "Εναλλαγή keep / cut" },
   { keys: ["Ctrl+Z"],        desc: "Undo τελευταίας αλλαγής" },
+  { keys: ["Ctrl+Shift+Z"], desc: "Redo" },
   { keys: ["Space"],         desc: "Play / Pause" },
   { keys: ["←", "→"],       desc: "Seek ±5s (στο player)" },
   { keys: ["0–9"],           desc: "Άλμα σε 0%–90% του βίντεο" },
