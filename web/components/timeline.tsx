@@ -49,6 +49,8 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   // the scroll event that our own programmatic scroll fires.
   const scrollRef = useRef<HTMLDivElement>(null);
   const programScrollRef = useRef(false);
+  // Populated by SegmentDetail so the N key can focus the notes textarea.
+  const notesFocusFnRef = useRef<(() => void) | null>(null);
 
   // Undo/redo stacks: each entry stores the decision before/after a toggle.
   // Refs avoid stale-closure issues; *Count states are render triggers only.
@@ -227,6 +229,13 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       // Modifier keys guard — don't intercept Ctrl+J etc.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
+      // N: focus notes textarea of the selected segment.
+      if ((e.key === "n" || e.key === "N") && notesFocusFnRef.current) {
+        e.preventDefault();
+        notesFocusFnRef.current();
+        return;
+      }
+
       if (filteredSegmentOrder.length === 0) return;
 
       // j/l navigate within the current filter; d/x/Delete/Backspace toggle.
@@ -291,7 +300,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo]);
+  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo, notesFocusFnRef]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -406,7 +415,13 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       ) : null}
 
       {selectedSeg ? (
-        <SegmentDetail index={selected!} seg={selectedSeg} jobId={jobId} preset={preset} />
+        <SegmentDetail
+          index={selected!}
+          seg={selectedSeg}
+          jobId={jobId}
+          preset={preset}
+          onRegisterFocus={(fn) => { notesFocusFnRef.current = fn; }}
+        />
       ) : (
         <p className="text-xs text-white/40">
           Πάτα ένα κομμάτι για να το κρατήσεις ή να το κόψεις.
@@ -545,6 +560,7 @@ function ClipRow({
   onToggle: (index: number, next: Decision) => void;
 }) {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
   const widthPx = Math.max(120, Math.round(clip.duration * pxPerSec));
 
   const waveformQ = useQuery({
@@ -553,6 +569,11 @@ function ClipRow({
     staleTime: Infinity,
     retry: false,
   });
+
+  function srcTimeFromEvent(e: React.PointerEvent<HTMLDivElement>): number {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(clip.duration, (e.clientX - rect.left) / pxPerSec));
+  }
 
   return (
     <div className="flex gap-3 px-3 py-3">
@@ -563,19 +584,30 @@ function ClipRow({
         <div className="font-mono text-white/40">{clip.duration.toFixed(1)}s</div>
       </div>
       <div
-        className="relative cursor-crosshair"
+        className={`relative ${scrubbing ? "cursor-ew-resize" : "cursor-crosshair"}`}
         style={{ width: widthPx, height: ROW_HEIGHT_PX }}
-        onClick={(e) => {
+        onPointerDown={(e) => {
+          // Only start scrub on the background (not on a segment button).
           if (e.target !== e.currentTarget) return;
-          const rect = e.currentTarget.getBoundingClientRect();
-          const srcTime = (e.clientX - rect.left) / pxPerSec;
-          onWaveformClick(Math.max(0, Math.min(clip.duration, srcTime)));
+          if (trimState) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setScrubbing(true);
+          onWaveformClick(srcTimeFromEvent(e));
         }}
         onPointerMove={(e) => {
-          if (!trimState) return;
-          setTrimState((s) => s ? { ...s, dx: e.clientX - s.startX } : null);
+          if (trimState) {
+            setTrimState((s) => s ? { ...s, dx: e.clientX - s.startX } : null);
+            return;
+          }
+          if (!scrubbing) return;
+          onWaveformClick(srcTimeFromEvent(e));
         }}
         onPointerUp={(e) => {
+          if (scrubbing) {
+            setScrubbing(false);
+            e.currentTarget.releasePointerCapture(e.pointerId);
+            return;
+          }
           if (!trimState) return;
           const { index, side, origStart, origEnd, dx } = trimState;
           const dt = dx / pxPerSec;
@@ -589,7 +621,7 @@ function ClipRow({
           e.currentTarget.releasePointerCapture(e.pointerId);
           setTrimState(null);
         }}
-        onPointerCancel={() => setTrimState(null)}
+        onPointerCancel={() => { setTrimState(null); setScrubbing(false); }}
       >
         {waveformQ.data && (
           <WaveformBackground
@@ -822,11 +854,13 @@ function SegmentDetail({
   seg,
   jobId,
   preset,
+  onRegisterFocus,
 }: {
   index: number;
   seg: SegmentDict;
   jobId: string;
   preset: string | undefined;
+  onRegisterFocus?: (fn: () => void) => void;
 }) {
   const featureEntries = Object.entries(seg.features)
     .filter(([k]) => k in FEATURE_LABELS)
@@ -840,6 +874,12 @@ function SegmentDetail({
 
   const noteMut = useNoteSegment(jobId, preset);
   const [localNotes, setLocalNotes] = useState(seg.notes ?? "");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Register focus function so the parent can call it via N key.
+  useEffect(() => {
+    onRegisterFocus?.(() => textareaRef.current?.focus());
+  }, [onRegisterFocus]);
 
   // Sync textarea when the selected segment changes (index or external update).
   useEffect(() => { setLocalNotes(seg.notes ?? ""); }, [seg.notes, index]);
@@ -916,10 +956,11 @@ function SegmentDetail({
       <div className="mt-3">
         <label className="mb-1 block text-[10px] text-white/35">Σημειώσεις</label>
         <textarea
+          ref={textareaRef}
           value={localNotes}
           onChange={(e) => setLocalNotes(e.target.value)}
           onBlur={handleNotesBlur}
-          placeholder="Προσθήκη σημείωσης…"
+          placeholder="Προσθήκη σημείωσης… (N)"
           rows={2}
           className="w-full resize-none rounded-lg border border-white/8 bg-white/5 px-2.5 py-1.5 text-[12px] text-white/80 placeholder:text-white/25 focus:border-cyan-500/40 focus:outline-none"
         />
@@ -1258,6 +1299,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["J", "←"],        desc: "Προηγούμενο segment" },
   { keys: ["L", "→"],        desc: "Επόμενο segment" },
   { keys: ["D", "X"],        desc: "Εναλλαγή keep / cut" },
+  { keys: ["N"],             desc: "Εστίαση στο πεδίο σημειώσεων" },
   { keys: ["Ctrl+Z"],        desc: "Undo τελευταίας αλλαγής" },
   { keys: ["Ctrl+Shift+Z"], desc: "Redo" },
   { keys: ["Space"],         desc: "Play / Pause" },
