@@ -2,8 +2,9 @@
 
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { ApiError } from "@/lib/api";
+import { ApiError, patchWord } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import { useWordCut } from "@/lib/use-word-cut";
 import { useWordEdit } from "@/lib/use-word-edit";
@@ -107,16 +108,21 @@ type WordMenu = {
 };
 
 export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect, onDirty, currentTime, onSeekRequest }: Props) {
+  const qc = useQueryClient();
+  const edlKey = ["edl", jobId, preset ?? null] as const;
+
   const toggleMut = useSegmentToggle(jobId, preset);
   const editMut = useWordEdit(jobId, preset);
   const cutMut = useWordCut(jobId, preset);
   const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
   const [wordMenu, setWordMenu] = useState<WordMenu | null>(null);
 
-  // ── Search state ──────────────────────────────────────────────────────────
+  // ── Search + Replace state ────────────────────────────────────────────────
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
+  const [showReplace, setShowReplace] = useState(false);
+  const [replaceValue, setReplaceValue] = useState("");
 
   // Find which word is currently playing based on the video's output time.
   const activeWord = useMemo(() => {
@@ -232,6 +238,43 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     onDirty?.();
   };
 
+  const handleReplace = () => {
+    const match = matchList[activeMatchIdx];
+    if (!match || !replaceValue.trim()) return;
+    editMut.mutate({ clipId: match.clipId, wordIndex: match.wordIndex, word: replaceValue.trim() });
+    onDirty?.();
+  };
+
+  const handleReplaceAll = async () => {
+    const matches = matchList;
+    if (matches.length === 0 || !replaceValue.trim()) return;
+    const replacement = replaceValue.trim();
+    await qc.cancelQueries({ queryKey: edlKey });
+    const prev = qc.getQueryData<Edl>(edlKey);
+    if (prev) {
+      const matchSet = new Set(matches.map((m) => `${m.clipId}:${m.wordIndex}`));
+      qc.setQueryData<Edl>(edlKey, {
+        ...prev,
+        transcripts: prev.transcripts.map((t) => ({
+          ...t,
+          words: t.words.map((w, i) =>
+            matchSet.has(`${t.clip_id}:${i}`) ? { ...w, word: replacement } : w,
+          ),
+        })),
+      });
+    }
+    try {
+      await Promise.all(
+        matches.map((m) => patchWord(jobId, m.clipId, m.wordIndex, replacement, preset)),
+      );
+      onDirty?.();
+    } catch {
+      if (prev) qc.setQueryData(edlKey, prev);
+    } finally {
+      void qc.invalidateQueries({ queryKey: edlKey });
+    }
+  };
+
   return (
     <section className="flex flex-col gap-3" data-transcript>
       <div className="flex items-center justify-between gap-3">
@@ -263,7 +306,13 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
           onQueryChange={(q) => setSearchQuery(q)}
           onPrev={() => goToMatch((activeMatchIdx - 1 + matchList.length) % matchList.length)}
           onNext={() => goToMatch((activeMatchIdx + 1) % matchList.length)}
-          onClose={() => { setShowSearch(false); setSearchQuery(""); }}
+          onClose={() => { setShowSearch(false); setSearchQuery(""); setShowReplace(false); setReplaceValue(""); }}
+          showReplace={showReplace}
+          replaceValue={replaceValue}
+          onToggleReplace={() => setShowReplace((v) => !v)}
+          onReplaceValueChange={setReplaceValue}
+          onReplace={handleReplace}
+          onReplaceAll={() => { void handleReplaceAll(); }}
         />
       ) : null}
 
@@ -356,6 +405,12 @@ function SearchBar({
   onPrev,
   onNext,
   onClose,
+  showReplace = false,
+  replaceValue = "",
+  onToggleReplace,
+  onReplaceValueChange,
+  onReplace,
+  onReplaceAll,
 }: {
   query: string;
   matchCount: number;
@@ -364,8 +419,15 @@ function SearchBar({
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
+  showReplace?: boolean;
+  replaceValue?: string;
+  onToggleReplace?: () => void;
+  onReplaceValueChange?: (v: string) => void;
+  onReplace?: () => void;
+  onReplaceAll?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const replaceRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   const hasQuery = query.trim() !== "";
@@ -376,58 +438,104 @@ function SearchBar({
     : "";
 
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2">
-      <span className="font-mono text-xs text-fuchsia-300/60">⌕</span>
-      <input
-        ref={inputRef}
-        type="search"
-        value={query}
-        placeholder="Αναζήτηση λέξης…"
-        onChange={(e) => onQueryChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            e.shiftKey ? onPrev() : onNext();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onClose();
-          }
-        }}
-        className="min-w-0 flex-1 bg-transparent text-sm text-white/90 placeholder-white/25 outline-none"
-      />
-      {hasQuery ? (
-        <span className="shrink-0 font-mono text-[11px] text-fuchsia-300/60">
-          {countLabel}
-        </span>
-      ) : null}
-      <div className="flex items-center gap-0.5">
+    <div className="flex flex-col gap-1 rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2">
+      {/* Search row */}
+      <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={onPrev}
-          disabled={matchCount === 0}
-          title="Προηγούμενο (Shift+Enter)"
-          className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
+          onClick={onToggleReplace}
+          title={showReplace ? "Απόκρυψη αντικατάστασης" : "Εμφάνιση αντικατάστασης"}
+          className="shrink-0 font-mono text-[10px] text-fuchsia-300/40 transition hover:text-fuchsia-200"
         >
-          ↑
+          {showReplace ? "▼" : "▶"}
         </button>
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={matchCount === 0}
-          title="Επόμενο (Enter)"
-          className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
-        >
-          ↓
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Κλείσιμο (Esc)"
-          className="ml-1 rounded p-1 text-white/30 transition hover:text-white/70"
-        >
-          ✕
-        </button>
+        <span className="font-mono text-xs text-fuchsia-300/60">⌕</span>
+        <input
+          ref={inputRef}
+          type="search"
+          value={query}
+          placeholder="Αναζήτηση λέξης…"
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.shiftKey ? onPrev() : onNext();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onClose();
+            }
+          }}
+          className="min-w-0 flex-1 bg-transparent text-sm text-white/90 placeholder-white/25 outline-none"
+        />
+        {hasQuery ? (
+          <span className="shrink-0 font-mono text-[11px] text-fuchsia-300/60">
+            {countLabel}
+          </span>
+        ) : null}
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={matchCount === 0}
+            title="Προηγούμενο (Shift+Enter)"
+            className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={matchCount === 0}
+            title="Επόμενο (Enter)"
+            className="rounded p-1 text-white/40 transition hover:text-white/80 disabled:opacity-25"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Κλείσιμο (Esc)"
+            className="ml-1 rounded p-1 text-white/30 transition hover:text-white/70"
+          >
+            ✕
+          </button>
+        </div>
       </div>
+
+      {/* Replace row */}
+      {showReplace ? (
+        <div className="flex items-center gap-2 pl-5">
+          <span className="shrink-0 font-mono text-xs text-fuchsia-300/40">↩</span>
+          <input
+            ref={replaceRef}
+            type="text"
+            value={replaceValue}
+            placeholder="Αντικατάσταση με…"
+            onChange={(e) => onReplaceValueChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); onReplace?.(); }
+              else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+            }}
+            className="min-w-0 flex-1 bg-transparent text-sm text-white/90 placeholder-white/25 outline-none"
+          />
+          <button
+            type="button"
+            onClick={onReplace}
+            disabled={matchCount === 0 || !replaceValue.trim()}
+            className="shrink-0 rounded-lg border border-white/10 px-2.5 py-0.5 text-xs text-white/50 transition hover:border-cyan-400/40 hover:text-cyan-200 disabled:opacity-30"
+          >
+            Αντικατάσταση
+          </button>
+          <button
+            type="button"
+            onClick={onReplaceAll}
+            disabled={matchCount === 0 || !replaceValue.trim()}
+            className="shrink-0 rounded-lg border border-white/10 px-2.5 py-0.5 text-xs text-white/50 transition hover:border-fuchsia-400/40 hover:text-fuchsia-200 disabled:opacity-30"
+          >
+            Όλα ({matchCount})
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
