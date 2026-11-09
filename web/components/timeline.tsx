@@ -77,6 +77,16 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     return m;
   }, [edl.render_chunks]);
 
+  const outputEndBySegment = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const chunk of edl.render_chunks) {
+      if (chunk.segment_index >= 0) {
+        m.set(chunk.segment_index, chunk.output_end);
+      }
+    }
+    return m;
+  }, [edl.render_chunks]);
+
   // Group segments by clip for row layout; preserve original EDL index so we
   // can PATCH by it later.
   const bySegmentIndex = useMemo(() => {
@@ -319,6 +329,16 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
             }
           }
         }
+      } else if (e.key === "[" || e.key === "{") {
+        // Seek to start of selected segment.
+        if (selected === null) return;
+        const ot = outputStartBySegment.get(selected);
+        if (ot !== undefined) { e.preventDefault(); onSeekRequest?.(ot); }
+      } else if (e.key === "]" || e.key === "}") {
+        // Seek to end of selected segment.
+        if (selected === null) return;
+        const ot = outputEndBySegment.get(selected);
+        if (ot !== undefined) { e.preventDefault(); onSeekRequest?.(ot); }
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         setAutoFollow((v) => !v);
@@ -331,7 +351,7 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo, notesFocusFnRef, outputStartBySegment, onSeekRequest]);
+  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo, notesFocusFnRef, outputStartBySegment, outputEndBySegment, onSeekRequest]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -1341,6 +1361,8 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["M"],             desc: "Συγχώνευση με το επόμενο segment" },
   { keys: ["C"],             desc: "Επόμενο cut segment" },
   { keys: ["Shift+C"],       desc: "Προηγούμενο cut segment" },
+  { keys: ["["],             desc: "Άλμα στην αρχή του segment" },
+  { keys: ["]"],             desc: "Άλμα στο τέλος του segment" },
   { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
   { keys: ["F"],             desc: "Toggle auto-scroll (follow cursor)" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },

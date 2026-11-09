@@ -617,11 +617,21 @@ function ClipTranscript({
           const isMatch =
             searchQuery.trim() !== "" &&
             a.word.word.toLowerCase().includes(searchQuery.trim().toLowerCase());
+          const prob = a.word.probability ?? 1;
+          const confidenceClass =
+            keep && !isPlaying && !isCurrentMatch
+              ? prob < 0.6
+                ? "underline decoration-orange-400/60 decoration-dotted underline-offset-2"
+                : prob < 0.8
+                ? "underline decoration-amber-400/50 decoration-dotted underline-offset-2"
+                : ""
+              : "";
           return (
             <button
               key={i}
               ref={isPlaying ? activeRef : isCurrentMatch ? searchRef : undefined}
               type="button"
+              title={prob < 0.8 ? `Πιθανότητα: ${(prob * 100).toFixed(0)}%` : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 onSeekToWord(a.clipId, a.word.start);
@@ -640,6 +650,7 @@ function ClipTranscript({
                   : isMatch
                   ? "bg-fuchsia-400/15 text-fuchsia-200"
                   : "",
+                confidenceClass,
               ].join(" ")}
             >
               {a.word.word.trim()}
