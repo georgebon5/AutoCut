@@ -4,12 +4,14 @@ import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { ApiError, patchWord } from "@/lib/api";
+import { ApiError, cutWord, patchWord } from "@/lib/api";
 import { useSegmentToggle } from "@/lib/use-segment-toggle";
 import { useWordCut } from "@/lib/use-word-cut";
 import { useWordEdit } from "@/lib/use-word-edit";
 import type { Decision, Edl, SegmentDict, Transcript as TranscriptT, WordTimestamp } from "@/lib/api.types";
 
+
+const DEFAULT_FILLERS = ["um", "uh", "hmm", "εε", "αα", "ααα", "εεε", "μμ", "μμμ"];
 
 interface Props {
   jobId: string;
@@ -123,6 +125,11 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
   const [showReplace, setShowReplace] = useState(false);
   const [replaceValue, setReplaceValue] = useState("");
+
+  // ── Filler word state ─────────────────────────────────────────────────────
+  const [showFillers, setShowFillers] = useState(false);
+  const [fillerList, setFillerList] = useState<string[]>(DEFAULT_FILLERS);
+  const [cuttingFillers, setCuttingFillers] = useState(false);
 
   // Find which word is currently playing based on the video's output time.
   const activeWord = useMemo(() => {
@@ -238,6 +245,42 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     onDirty?.();
   };
 
+  const fillerSet = useMemo(
+    () => new Set(fillerList.map((f) => f.trim().toLowerCase()).filter(Boolean)),
+    [fillerList],
+  );
+
+  // Filler word occurrences in *kept* segments only — these are the ones we can cut.
+  const fillerMatches = useMemo(() => {
+    if (!showFillers || fillerSet.size === 0) return [];
+    const result: { clipId: string; word: WordTimestamp }[] = [];
+    for (const t of edl.transcripts) {
+      t.words.forEach((w) => {
+        if (!fillerSet.has(w.word.trim().toLowerCase())) return;
+        // Only count it if the segment it falls in is currently kept.
+        const ot = sourceToOutput(t.clip_id, w.start, edl);
+        if (ot !== null) result.push({ clipId: t.clip_id, word: w });
+      });
+    }
+    return result;
+  }, [showFillers, fillerSet, edl]);
+
+  const handleCutAllFillers = async () => {
+    if (fillerMatches.length === 0 || cuttingFillers) return;
+    setCuttingFillers(true);
+    try {
+      // Sequential calls: each cut can split a segment, so the next call
+      // needs the updated structure to find its segment correctly.
+      for (const m of fillerMatches) {
+        await cutWord(jobId, m.clipId, m.word.start, m.word.end, preset);
+      }
+      onDirty?.();
+    } finally {
+      void qc.invalidateQueries({ queryKey: edlKey });
+      setCuttingFillers(false);
+    }
+  };
+
   const handleReplace = () => {
     const match = matchList[activeMatchIdx];
     if (!match || !replaceValue.trim()) return;
@@ -284,6 +327,19 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setShowFillers((v) => !v)}
+            title="Λέξεις γεμίσματος (um, uh, εε…)"
+            className={[
+              "rounded border px-1.5 py-0.5 text-xs transition",
+              showFillers
+                ? "border-amber-400/50 bg-amber-500/15 text-amber-200"
+                : "border-white/10 bg-white/5 text-white/35 hover:border-white/20 hover:text-white/60",
+            ].join(" ")}
+          >
+            ✂ fillers
+          </button>
+          <button
+            type="button"
             onClick={() => setShowSearch((v) => !v)}
             title="Αναζήτηση στο κείμενο (Ctrl+F)"
             className={[
@@ -297,6 +353,16 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
           </button>
         </div>
       </div>
+
+      {showFillers ? (
+        <FillerBar
+          fillerList={fillerList}
+          fillerCount={fillerMatches.length}
+          busy={cuttingFillers}
+          onChangeList={setFillerList}
+          onCutAll={() => { void handleCutAllFillers(); }}
+        />
+      ) : null}
 
       {showSearch ? (
         <SearchBar
@@ -328,6 +394,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
             searchQuery={searchQuery}
             currentMatchKey={currentMatchKey}
             editing={editing}
+            fillerSet={showFillers ? fillerSet : null}
             onCommitEdit={commitEdit}
             onCancelEdit={() => setEditing(null)}
             onSeekToWord={(clipId, sourceTime) => {
@@ -389,6 +456,75 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
         </p>
       ) : null}
     </section>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Filler word bar
+// ---------------------------------------------------------------------------
+
+function FillerBar({
+  fillerList,
+  fillerCount,
+  busy,
+  onChangeList,
+  onCutAll,
+}: {
+  fillerList: string[];
+  fillerCount: number;
+  busy: boolean;
+  onChangeList: (list: string[]) => void;
+  onCutAll: () => void;
+}) {
+  const [inputVal, setInputVal] = useState("");
+
+  const addFiller = () => {
+    const word = inputVal.trim().toLowerCase();
+    if (!word || fillerList.includes(word)) { setInputVal(""); return; }
+    onChangeList([...fillerList, word]);
+    setInputVal("");
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/8 px-3 py-2">
+      <span className="shrink-0 text-xs text-amber-300/60">✂</span>
+      {fillerList.map((f) => (
+        <span
+          key={f}
+          className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-200"
+        >
+          {f}
+          <button
+            type="button"
+            onClick={() => onChangeList(fillerList.filter((x) => x !== f))}
+            className="text-amber-400/60 transition hover:text-amber-200"
+            aria-label={`Αφαίρεση ${f}`}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={inputVal}
+        placeholder="+ προσθήκη…"
+        onChange={(e) => setInputVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); addFiller(); }
+        }}
+        onBlur={addFiller}
+        className="w-24 min-w-0 bg-transparent text-[11px] text-white/70 placeholder-white/25 outline-none"
+      />
+      <button
+        type="button"
+        onClick={onCutAll}
+        disabled={fillerCount === 0 || busy}
+        className="ml-auto shrink-0 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-200 transition hover:border-amber-400/50 hover:bg-amber-400/20 disabled:opacity-30"
+      >
+        {busy ? "Κόβει…" : `Κόψε όλα (${fillerCount})`}
+      </button>
+    </div>
   );
 }
 
@@ -550,6 +686,7 @@ function ClipTranscript({
   searchQuery,
   currentMatchKey,
   editing,
+  fillerSet,
   onCommitEdit,
   onCancelEdit,
   onSeekToWord,
@@ -563,6 +700,7 @@ function ClipTranscript({
   searchQuery: string;
   currentMatchKey: string | null;
   editing: { clipId: string; wordIndex: number } | null;
+  fillerSet: Set<string> | null;
   onCommitEdit: (clipId: string, wordIndex: number, next: string) => void;
   onCancelEdit: () => void;
   onSeekToWord: (clipId: string, sourceTime: number) => void;
@@ -618,8 +756,9 @@ function ClipTranscript({
             searchQuery.trim() !== "" &&
             a.word.word.toLowerCase().includes(searchQuery.trim().toLowerCase());
           const prob = a.word.probability ?? 1;
+          const isFiller = keep && !!fillerSet?.has(a.word.word.trim().toLowerCase());
           const confidenceClass =
-            keep && !isPlaying && !isCurrentMatch
+            keep && !isPlaying && !isCurrentMatch && !isFiller
               ? prob < 0.6
                 ? "underline decoration-orange-400/60 decoration-dotted underline-offset-2"
                 : prob < 0.8
@@ -631,7 +770,13 @@ function ClipTranscript({
               key={i}
               ref={isPlaying ? activeRef : isCurrentMatch ? searchRef : undefined}
               type="button"
-              title={prob < 0.8 ? `Πιθανότητα: ${(prob * 100).toFixed(0)}%` : undefined}
+              title={
+                isFiller
+                  ? "Λέξη γεμίσματος — κλικ για κοπή"
+                  : prob < 0.8
+                  ? `Πιθανότητα: ${(prob * 100).toFixed(0)}%`
+                  : undefined
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 onSeekToWord(a.clipId, a.word.start);
@@ -644,6 +789,9 @@ function ClipTranscript({
                   ? "text-white/90 hover:bg-cyan-400/15"
                   : "text-white/35 line-through hover:bg-white/5",
                 active ? "ring-1 ring-fuchsia-400/70" : "",
+                isFiller && !isPlaying && !isCurrentMatch
+                  ? "bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/40"
+                  : "",
                 isPlaying ? "bg-amber-400/30 ring-1 ring-amber-400/60 text-amber-100" : "",
                 isCurrentMatch
                   ? "bg-fuchsia-400/40 ring-1 ring-fuchsia-400/70 text-fuchsia-100"
