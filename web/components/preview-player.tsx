@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { listOutputs, outputDownloadUrl } from "@/lib/api";
 import type { Edl, OutputFile, RenderChunk } from "@/lib/api.types";
@@ -129,6 +129,12 @@ function PlayerSkeleton({ label }: { label: string }) {
  */
 const SPEED_STEPS = [0.5, 1, 1.5, 2] as const;
 
+function fmtPt(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(1).padStart(4, "0");
+  return `${m}:${sec}`;
+}
+
 function VideoWithSpaceToggle({
   src,
   rendering,
@@ -144,6 +150,16 @@ function VideoWithSpaceToggle({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [speed, setSpeed] = useState<number>(1);
+  const [loopIn, setLoopIn] = useState<number | null>(null);
+  const [loopOut, setLoopOut] = useState<number | null>(null);
+  const [looping, setLooping] = useState(false);
+
+  // Refs so timeupdate closure always sees current loop values without churn.
+  const loopRef = useRef({ looping: false, loopIn: null as number | null, loopOut: null as number | null });
+  useEffect(() => { loopRef.current = { looping, loopIn, loopOut }; }, [looping, loopIn, loopOut]);
+
+  const clearLoop = useCallback(() => { setLoopIn(null); setLoopOut(null); setLooping(false); }, []);
+
   // Apply speed changes to the video element.
   useEffect(() => {
     const v = videoRef.current;
@@ -171,28 +187,29 @@ function VideoWithSpaceToggle({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== " " && e.code !== "Space") return;
       const t = e.target as HTMLElement | null;
-      if (
-        t && (
-          t.tagName === "INPUT"
-          || t.tagName === "TEXTAREA"
-          || t.tagName === "SELECT"
-          || t.tagName === "BUTTON"
-          || t.tagName === "A"
-          || t.isContentEditable
-        )
-      ) return;
+      const inInput = !!(t && (
+        t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"
+        || t.tagName === "BUTTON" || t.tagName === "A" || t.isContentEditable
+      ));
       const v = videoRef.current;
       if (!v) return;
-      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-      if (typeof document !== "undefined" && !document.hasFocus()) return;
-      const rect = v.getBoundingClientRect();
-      const inView = rect.bottom > 0 && rect.top < window.innerHeight;
-      if (!inView) return;
-      e.preventDefault();
-      if (v.paused) void v.play();
-      else v.pause();
+
+      if (e.key === " " || e.code === "Space") {
+        if (inInput) return;
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+        if (typeof document !== "undefined" && !document.hasFocus()) return;
+        const rect = v.getBoundingClientRect();
+        if (rect.bottom <= 0 || rect.top >= window.innerHeight) return;
+        e.preventDefault();
+        if (v.paused) void v.play(); else v.pause();
+      } else if ((e.key === "i" || e.key === "I") && !inInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setLoopIn(v.currentTime);
+      } else if ((e.key === "o" || e.key === "O") && !inInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setLoopOut(v.currentTime);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -209,6 +226,13 @@ function VideoWithSpaceToggle({
     const v = videoRef.current;
     if (!v) return;
     const now = v.currentTime;
+    // Loop region: jump back to in-point when past out-point.
+    const { looping: l, loopIn: li, loopOut: lo } = loopRef.current;
+    if (l && li !== null && lo !== null && lo > li && now >= lo) {
+      v.currentTime = li;
+      return;
+    }
+    // Live-skip cut chunks.
     for (const c of cutRef.current) {
       if (now >= c.output_start && now < c.output_end) {
         v.currentTime = c.output_end + 0.001;
@@ -217,6 +241,8 @@ function VideoWithSpaceToggle({
     }
     onPlaybackTimeRef.current?.(now);
   };
+
+  const loopReady = loopIn !== null && loopOut !== null && loopOut > loopIn;
 
   return (
     <>
@@ -233,7 +259,7 @@ function VideoWithSpaceToggle({
         src={src}
       />
       {/* Playback speed bar */}
-      <div className="flex items-center gap-1 px-1 pb-1 pt-0.5">
+      <div className="flex items-center gap-1 px-1 pt-0.5">
         <span className="mr-1 text-[10px] text-white/35">Ταχύτητα</span>
         {SPEED_STEPS.map((s) => (
           <button
@@ -250,6 +276,57 @@ function VideoWithSpaceToggle({
             {s}×
           </button>
         ))}
+      </div>
+      {/* Loop in/out row */}
+      <div className="flex items-center gap-2 px-1 pb-1">
+        <span className="text-[10px] text-white/35">Loop</span>
+        <button
+          type="button"
+          title="Ορισμός αρχής (I)"
+          onClick={() => setLoopIn(videoRef.current?.currentTime ?? 0)}
+          className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-white/40 transition hover:border-cyan-400/40 hover:text-cyan-200"
+        >
+          I
+        </button>
+        <span className={`font-mono text-[10px] tabular-nums ${loopIn !== null ? "text-cyan-300" : "text-white/20"}`}>
+          {loopIn !== null ? fmtPt(loopIn) : "--:--"}
+        </span>
+        <span className="text-[10px] text-white/20">—</span>
+        <span className={`font-mono text-[10px] tabular-nums ${loopOut !== null ? "text-cyan-300" : "text-white/20"}`}>
+          {loopOut !== null ? fmtPt(loopOut) : "--:--"}
+        </span>
+        <button
+          type="button"
+          title="Ορισμός τέλους (O)"
+          onClick={() => setLoopOut(videoRef.current?.currentTime ?? 0)}
+          className="rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-white/40 transition hover:border-cyan-400/40 hover:text-cyan-200"
+        >
+          O
+        </button>
+        <button
+          type="button"
+          disabled={!loopReady}
+          onClick={() => setLooping((v) => !v)}
+          title={looping ? "Απενεργοποίηση loop" : "Ενεργοποίηση loop"}
+          className={[
+            "rounded border px-1.5 py-0.5 text-[10px] font-medium transition disabled:opacity-25",
+            looping
+              ? "border-amber-400/50 bg-amber-400/15 text-amber-200"
+              : "border-white/10 text-white/40 hover:border-white/20 hover:text-white/70",
+          ].join(" ")}
+        >
+          ∞
+        </button>
+        {(loopIn !== null || loopOut !== null) && (
+          <button
+            type="button"
+            onClick={clearLoop}
+            title="Καθαρισμός"
+            className="text-[10px] text-white/25 transition hover:text-white/60"
+          >
+            ✕
+          </button>
+        )}
       </div>
     </>
   );
