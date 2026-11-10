@@ -39,6 +39,7 @@ type Filter = "all" | "keep" | "cut";
 
 export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onSeekRequest }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
+  const [multiSel, setMultiSel] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<Filter>("all");
   const [showHelp, setShowHelp] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -251,36 +252,74 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       // j/l navigate within the current filter; d/x/Delete/Backspace toggle.
       if (e.key === "j" || e.key === "J" || e.key === "ArrowLeft") {
         e.preventDefault();
-        setSelected((s) => {
-          const pos = s === null ? 0 : Math.max(0, filteredSegmentOrder.indexOf(s) - 1);
-          const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[0]!;
-          const ot = outputStartBySegment.get(next);
-          if (ot !== undefined) onSeekRequest?.(ot);
-          return next;
-        });
+        if (e.shiftKey) {
+          // Extend multi-selection to previous segment.
+          const prevPos = selected === null ? 0 : Math.max(0, filteredSegmentOrder.indexOf(selected) - 1);
+          const prevIdx = filteredSegmentOrder[prevPos];
+          if (prevIdx !== undefined) {
+            setMultiSel((ms) => { const s = new Set(ms); if (selected !== null) s.add(selected); s.add(prevIdx); return s; });
+            setSelected(prevIdx);
+            const ot = outputStartBySegment.get(prevIdx);
+            if (ot !== undefined) onSeekRequest?.(ot);
+          }
+        } else {
+          setMultiSel(new Set());
+          setSelected((s) => {
+            const pos = s === null ? 0 : Math.max(0, filteredSegmentOrder.indexOf(s) - 1);
+            const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[0]!;
+            const ot = outputStartBySegment.get(next);
+            if (ot !== undefined) onSeekRequest?.(ot);
+            return next;
+          });
+        }
       } else if (e.key === "l" || e.key === "L" || e.key === "ArrowRight") {
         e.preventDefault();
-        setSelected((s) => {
-          const cur = s === null ? -1 : filteredSegmentOrder.indexOf(s);
-          const pos = Math.min(filteredSegmentOrder.length - 1, cur + 1);
-          const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[filteredSegmentOrder.length - 1]!;
-          const ot = outputStartBySegment.get(next);
-          if (ot !== undefined) onSeekRequest?.(ot);
-          return next;
-        });
+        if (e.shiftKey) {
+          // Extend multi-selection to next segment.
+          const curPos = selected === null ? -1 : filteredSegmentOrder.indexOf(selected);
+          const nextPos = Math.min(filteredSegmentOrder.length - 1, curPos + 1);
+          const nextIdx = filteredSegmentOrder[nextPos];
+          if (nextIdx !== undefined) {
+            setMultiSel((ms) => { const s = new Set(ms); if (selected !== null) s.add(selected); s.add(nextIdx); return s; });
+            setSelected(nextIdx);
+            const ot = outputStartBySegment.get(nextIdx);
+            if (ot !== undefined) onSeekRequest?.(ot);
+          }
+        } else {
+          setMultiSel(new Set());
+          setSelected((s) => {
+            const cur = s === null ? -1 : filteredSegmentOrder.indexOf(s);
+            const pos = Math.min(filteredSegmentOrder.length - 1, cur + 1);
+            const next = filteredSegmentOrder[pos] ?? filteredSegmentOrder[filteredSegmentOrder.length - 1]!;
+            const ot = outputStartBySegment.get(next);
+            if (ot !== undefined) onSeekRequest?.(ot);
+            return next;
+          });
+        }
       } else if (
         e.key === "d" || e.key === "D"
         || e.key === "x" || e.key === "X"
         || e.key === "Delete" || e.key === "Backspace"
       ) {
-        if (selected === null) return;
-        const seg = edl.segments[selected];
-        if (!seg) return;
         e.preventDefault();
-        const next: Decision = seg.decision === "keep" ? "cut" : "keep";
-        pushUndo(selected, seg.decision as Decision, next);
-        toggleMut.mutate({ index: selected, decision: next });
-        onDirty?.();
+        if (multiSel.size > 0) {
+          // Batch-toggle all multi-selected segments.
+          const updates = [...multiSel].flatMap((i) => {
+            const seg = edl.segments[i];
+            if (!seg) return [];
+            return [{ index: i, decision: (seg.decision === "keep" ? "cut" : "keep") as Decision }];
+          });
+          if (updates.length) { batchMut.mutate(updates); onDirty?.(); }
+          setMultiSel(new Set());
+        } else {
+          if (selected === null) return;
+          const seg = edl.segments[selected];
+          if (!seg) return;
+          const next: Decision = seg.decision === "keep" ? "cut" : "keep";
+          pushUndo(selected, seg.decision as Decision, next);
+          toggleMut.mutate({ index: selected, decision: next });
+          onDirty?.();
+        }
       } else if (e.key === "s" || e.key === "S") {
         // Split selected segment at current playback position.
         if (selected === null || !activeCursor) return;
@@ -346,12 +385,12 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         e.preventDefault();
         setShowHelp((v) => !v);
       } else if (e.key === "Escape") {
-        setShowHelp(false);
+        if (multiSel.size > 0) { setMultiSel(new Set()); } else { setShowHelp(false); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [edl.segments, filteredSegmentOrder, selected, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, onDirty, handleUndo, handleRedo, pushUndo, notesFocusFnRef, outputStartBySegment, outputEndBySegment, onSeekRequest]);
+  }, [edl.segments, filteredSegmentOrder, selected, multiSel, activeCursor, pxPerSec, toggleMut, splitMut, mergeMut, batchMut, onDirty, handleUndo, handleRedo, pushUndo, notesFocusFnRef, outputStartBySegment, outputEndBySegment, onSeekRequest]);
 
   // Ctrl+scroll zooms the waveform timeline. Attached to the section so it
   // only fires while the pointer is inside the timeline, not the whole page.
@@ -387,6 +426,36 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
           />
         </div>
       </div>
+
+      {multiSel.size > 0 && (
+        <div className="flex items-center gap-2 rounded-xl border border-orange-400/25 bg-orange-500/8 px-3 py-1.5">
+          <span className="text-xs text-orange-200/70">{multiSel.size} επιλεγμένα</span>
+          {(["keep", "cut"] as const).map((dec) => (
+            <button
+              key={dec}
+              type="button"
+              onClick={() => {
+                const updates = [...multiSel].flatMap((i) => {
+                  const seg = edl.segments[i];
+                  return seg && seg.decision !== dec ? [{ index: i, decision: dec }] : [];
+                });
+                if (updates.length) { batchMut.mutate(updates); onDirty?.(); }
+                setMultiSel(new Set());
+              }}
+              className="rounded-lg border border-orange-400/20 px-2.5 py-0.5 text-xs text-orange-200/70 transition hover:border-orange-400/40 hover:text-orange-100"
+            >
+              {dec === "keep" ? "Κράτα" : "Κόψε"}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setMultiSel(new Set())}
+            className="ml-auto text-xs text-orange-200/40 transition hover:text-orange-200/80"
+          >
+            ✕ Καθαρισμός
+          </button>
+        </div>
+      )}
 
       <div
         ref={scrollRef}
@@ -436,7 +505,12 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                   ? activeCursor.sourceX
                   : null
               }
-              onSelect={selectAndSeek}
+              multiSel={multiSel}
+              onSelect={(index) => { setMultiSel(new Set()); selectAndSeek(index); }}
+              onShiftSelect={(index) => {
+                setMultiSel((ms) => { const s = new Set(ms); if (s.has(index)) s.delete(index); else s.add(index); return s; });
+                setSelected(index);
+              }}
               onWaveformClick={(srcTime) => {
                 const ot = sourceToOutput(clip.clip_id, srcTime);
                 if (ot !== null) onSeekRequest?.(ot);
@@ -588,9 +662,11 @@ function ClipRow({
   clip,
   items,
   selectedIndex,
+  multiSel,
   cursorX,
   pxPerSec,
   onSelect,
+  onShiftSelect,
   onWaveformClick,
   onTrim,
   onSplit,
@@ -601,9 +677,11 @@ function ClipRow({
   clip: Clip;
   items: { seg: SegmentDict; index: number }[];
   selectedIndex: number | null;
+  multiSel: Set<number>;
   cursorX: number | null;
   pxPerSec: number;
   onSelect: (index: number) => void;
+  onShiftSelect: (index: number) => void;
   onWaveformClick: (sourceTime: number) => void;
   onTrim: (index: number, start: number | undefined, end: number | undefined) => void;
   onSplit: (index: number, at: number) => void;
@@ -701,6 +779,7 @@ function ClipRow({
           );
           const keep = seg.decision === "keep";
           const active = selectedIndex === index;
+          const inMultiSel = multiSel.has(index);
           const next: Decision = keep ? "cut" : "keep";
           // Score drives opacity for kept blocks: strong keeps are vivid,
           // borderline keeps are more transparent. Clamp to [0.25, 1].
@@ -714,9 +793,10 @@ function ClipRow({
               type="button"
               onClick={(e) => {
                 if (e.altKey) {
-                  // Alt+Click: split at the clicked source time.
                   const sourceTime = dispStart + e.nativeEvent.offsetX / pxPerSec;
                   onSplit(index, sourceTime);
+                } else if (e.shiftKey) {
+                  onShiftSelect(index);
                 } else {
                   onSelect(index);
                 }
@@ -736,6 +816,7 @@ function ClipRow({
                   ? "border-cyan-400/60 bg-cyan-400/30 hover:bg-cyan-400/50"
                   : "border-dashed border-white/15 bg-white/[0.03] hover:bg-white/10",
                 active ? "ring-2 ring-fuchsia-400/70" : "",
+                inMultiSel && !active ? "ring-2 ring-orange-400/70" : "",
               ].join(" ")}
             >
               {/* Show score label inside wide-enough kept blocks */}
@@ -1349,7 +1430,8 @@ type ShortcutRow = { keys: string[]; desc: string };
 const SHORTCUTS: ShortcutRow[] = [
   { keys: ["J", "←"],        desc: "Προηγούμενο segment" },
   { keys: ["L", "→"],        desc: "Επόμενο segment" },
-  { keys: ["D", "X"],        desc: "Εναλλαγή keep / cut" },
+  { keys: ["Shift+J/L"],     desc: "Επέκταση πολλαπλής επιλογής" },
+  { keys: ["D", "X"],        desc: "Εναλλαγή keep / cut (ή batch αν υπάρχει επιλογή)" },
   { keys: ["N"],             desc: "Εστίαση στο πεδίο σημειώσεων" },
   { keys: ["Ctrl+Z"],        desc: "Undo τελευταίας αλλαγής" },
   { keys: ["Ctrl+Shift+Z"], desc: "Redo" },
