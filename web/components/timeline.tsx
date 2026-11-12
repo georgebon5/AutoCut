@@ -533,6 +533,14 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
         </div>
       </div>
 
+      <MinimapStrip
+        segments={edl.segments}
+        clips={edl.clips}
+        totalDuration={totalDuration}
+        pxPerSec={pxPerSec}
+        scrollEl={scrollRef.current}
+      />
+
       {(toggleMut.isError || batchMut.isError) ? (
         <p className="text-sm text-red-400">
           {((toggleMut.error ?? batchMut.error) as ApiError | Error).message}
@@ -1273,6 +1281,112 @@ function StatsBar({
         </span>
       </span>
       <span className="text-white/35">· {total} κομμάτια</span>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Minimap — compact overview strip with viewport indicator
+// ---------------------------------------------------------------------------
+
+const MINIMAP_LABEL_PX = 120; // matches LABEL_OFFSET_PX in auto-scroll logic
+
+function MinimapStrip({
+  segments,
+  clips,
+  totalDuration,
+  pxPerSec,
+  scrollEl,
+}: {
+  segments: SegmentDict[];
+  clips: Clip[];
+  totalDuration: number;
+  pxPerSec: number;
+  scrollEl: HTMLDivElement | null;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollClientWidth, setScrollClientWidth] = useState(0);
+  const [mapWidth, setMapWidth] = useState(0);
+
+  // Track main timeline scroll.
+  useEffect(() => {
+    const el = scrollEl;
+    if (!el) return;
+    const sync = () => { setScrollLeft(el.scrollLeft); setScrollClientWidth(el.clientWidth); };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync);
+    return () => { el.removeEventListener("scroll", sync); window.removeEventListener("resize", sync); };
+  }, [scrollEl]);
+
+  // Measure minimap container.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setMapWidth(Math.max(0, el.clientWidth - MINIMAP_LABEL_PX)));
+    ro.observe(el);
+    setMapWidth(Math.max(0, el.clientWidth - MINIMAP_LABEL_PX));
+    return () => ro.disconnect();
+  }, []);
+
+  if (totalDuration === 0 || mapWidth === 0) return null;
+
+  // Don't show if nothing is scrollable (timeline fits without scrolling).
+  const totalTimelinePx = totalDuration * pxPerSec;
+  const usableViewport = scrollClientWidth - MINIMAP_LABEL_PX;
+  if (totalTimelinePx <= usableViewport + 4) return null;
+
+  const scale = mapWidth / totalDuration; // minimap px per source-second
+
+  // Viewport rectangle in minimap coords.
+  const viewL = Math.max(0, (scrollLeft / totalTimelinePx) * mapWidth);
+  const viewW = Math.min(mapWidth - viewL, (usableViewport / totalTimelinePx) * mapWidth);
+
+  // Click on minimap → scroll main timeline.
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!scrollEl) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left - MINIMAP_LABEL_PX;
+    const targetSec = x / scale;
+    scrollEl.scrollLeft = Math.max(0, targetSec * pxPerSec - usableViewport / 2);
+  };
+
+  // Group segments by clip for position lookup.
+  const clipDur = new Map(clips.map((c) => [c.clip_id, c.duration]));
+
+  return (
+    <div ref={containerRef} className="relative h-5 w-full cursor-pointer select-none" onClick={handleClick} title="Minimap — κλικ για πλοήγηση">
+      {/* Label spacer */}
+      <div className="absolute inset-y-0 left-0 flex items-center" style={{ width: MINIMAP_LABEL_PX }}>
+        <span className="pl-3 text-[9px] text-white/20">MAP</span>
+      </div>
+      {/* Background */}
+      <div className="absolute inset-y-0 rounded-sm bg-white/[0.03]" style={{ left: MINIMAP_LABEL_PX, right: 0 }} />
+      {/* Segments */}
+      <div className="absolute inset-y-1 overflow-hidden" style={{ left: MINIMAP_LABEL_PX, right: 0 }}>
+        {segments.map((seg, i) => {
+          const dur = clipDur.get(seg.clip_id);
+          if (!dur) return null;
+          const left = Math.round(seg.start * scale);
+          const width = Math.max(1, Math.round((seg.end - seg.start) * scale));
+          return (
+            <div
+              key={i}
+              className={`absolute inset-y-0 rounded-sm ${
+                seg.decision === "keep" ? "bg-cyan-400/50" : "bg-white/10"
+              }`}
+              style={{ left, width }}
+            />
+          );
+        })}
+      </div>
+      {/* Viewport indicator */}
+      <div
+        className="pointer-events-none absolute inset-y-0 rounded-sm bg-white/10 ring-1 ring-white/30"
+        style={{ left: MINIMAP_LABEL_PX + viewL, width: Math.max(4, viewW) }}
+      />
     </div>
   );
 }
