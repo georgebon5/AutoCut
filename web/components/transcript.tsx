@@ -226,6 +226,31 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
     return map;
   }, [edl]);
 
+  // Transcript statistics derived from EDL + word data.
+  const transcriptStats = useMemo(() => {
+    const assignments = buildWordToSegment(edl);
+    let keptWords = 0;
+    let confSum = 0;
+    let confCount = 0;
+    for (const a of assignments) {
+      const seg = edl.segments[a.segIndex];
+      if (seg?.decision === "keep") {
+        keptWords++;
+        const p = a.word.probability ?? 1;
+        confSum += p;
+        confCount++;
+      }
+    }
+    let speakingSec = 0;
+    for (const seg of edl.segments) {
+      if (seg.decision === "keep") speakingSec += seg.end - seg.start;
+    }
+    const totalWords = assignments.length;
+    const wpm = speakingSec > 5 ? Math.round((keptWords / speakingSec) * 60) : null;
+    const avgConf = confCount > 0 ? confSum / confCount : null;
+    return { totalWords, keptWords, speakingSec, wpm, avgConf };
+  }, [edl]);
+
   const hasAnyWords = edl.transcripts.some((t) => t.words.length > 0);
   if (!hasAnyWords) {
     return (
@@ -382,6 +407,8 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
         />
       ) : null}
 
+      <TranscriptStats stats={transcriptStats} />
+
       <div className="glass-card flex max-h-80 flex-col gap-4 overflow-y-auto rounded-2xl p-5">
         {edl.transcripts.map((t) => (
           <ClipTranscript
@@ -456,6 +483,55 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
         </p>
       ) : null}
     </section>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Transcript statistics strip
+// ---------------------------------------------------------------------------
+
+function fmtSpeakTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+interface TStats {
+  totalWords: number;
+  keptWords: number;
+  speakingSec: number;
+  wpm: number | null;
+  avgConf: number | null;
+}
+
+function TranscriptStats({ stats }: { stats: TStats }) {
+  const { totalWords, keptWords, speakingSec, wpm, avgConf } = stats;
+  if (totalWords === 0) return null;
+
+  const statItems: { label: string; value: string; dim?: boolean }[] = [
+    { label: "λόγια", value: `${keptWords}`, dim: keptWords === totalWords },
+    ...(keptWords !== totalWords ? [{ label: "σύνολο", value: `${totalWords}`, dim: true }] : []),
+    { label: "ομιλία", value: fmtSpeakTime(speakingSec) },
+    ...(wpm !== null ? [{ label: "λ/λ", value: `${wpm}` }] : []),
+    ...(avgConf !== null ? [{
+      label: "εμπιστ.",
+      value: `${Math.round(avgConf * 100)}%`,
+      dim: avgConf >= 0.9,
+    }] : []),
+  ];
+
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+      {statItems.map(({ label, value, dim }) => (
+        <span key={label} className="flex items-baseline gap-1">
+          <span className={`font-mono text-xs font-medium ${dim ? "text-white/35" : "text-white/70"}`}>
+            {value}
+          </span>
+          <span className="text-[10px] text-white/25">{label}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
