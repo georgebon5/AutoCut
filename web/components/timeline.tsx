@@ -19,6 +19,7 @@ const ZOOM_STEP = 1.25;
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 8;
 const MIN_BLOCK_PX = 6;    // keep tiny segments tappable
+const NOTE_TEMPLATES = ["👍 Good take", "⚠ Review", "🎬 B-roll", "✂ Cut this", "⭐ Highlight"];
 const ROW_HEIGHT_PX = 56;
 
 
@@ -1104,6 +1105,33 @@ function SegmentDetail({
           rows={2}
           className="w-full resize-none rounded-lg border border-white/8 bg-white/5 px-2.5 py-1.5 text-[12px] text-white/80 placeholder:text-white/25 focus:border-cyan-500/40 focus:outline-none"
         />
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {NOTE_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl}
+              type="button"
+              onClick={() => {
+                setLocalNotes(tpl);
+                noteMut.mutate({ index, notes: tpl });
+              }}
+              className="rounded border border-white/8 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/35 transition hover:border-white/15 hover:text-white/60"
+            >
+              {tpl}
+            </button>
+          ))}
+          {localNotes.trim() && (
+            <button
+              type="button"
+              onClick={() => {
+                setLocalNotes("");
+                noteMut.mutate({ index, notes: "" });
+              }}
+              className="ml-auto rounded px-1 py-0.5 text-[10px] text-white/20 transition hover:text-white/50"
+            >
+              ✕ Διαγραφή
+            </button>
+          )}
+        </div>
         {noteMut.isError ? (
           <p className="mt-1 text-[10px] text-red-400">Αποτυχία αποθήκευσης</p>
         ) : null}

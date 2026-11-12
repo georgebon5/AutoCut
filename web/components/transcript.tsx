@@ -118,6 +118,7 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
   const cutMut = useWordCut(jobId, preset);
   const [editing, setEditing] = useState<{ clipId: string; wordIndex: number } | null>(null);
   const [wordMenu, setWordMenu] = useState<WordMenu | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // ── Search + Replace state ────────────────────────────────────────────────
   const [showSearch, setShowSearch] = useState(false);
@@ -350,6 +351,23 @@ export default function Transcript({ jobId, preset, edl, selectedIndex, onSelect
           Κείμενο · κλικ σε λέξη για επεξεργασία ή κοπή
         </h2>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            title="Αντιγραφή κειμένου"
+            onClick={() => {
+              const text = edl.transcripts
+                .map((t) => t.words.map((w) => w.word.trim()).filter(Boolean).join(" "))
+                .filter(Boolean)
+                .join("\n\n");
+              void navigator.clipboard.writeText(text).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              });
+            }}
+            className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-white/35 transition hover:border-white/20 hover:text-white/60"
+          >
+            {copied ? "✓" : "⎘"}
+          </button>
           <button
             type="button"
             onClick={() => setShowFillers((v) => !v)}
