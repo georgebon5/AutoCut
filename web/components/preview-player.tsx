@@ -209,6 +209,18 @@ function VideoWithSpaceToggle({
       } else if ((e.key === "o" || e.key === "O") && !inInput && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setLoopOut(v.currentTime);
+      } else if ((e.key === "<" || e.key === ",") && !inInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setSpeed((s) => {
+          const idx = (SPEED_STEPS as readonly number[]).indexOf(s);
+          return idx > 0 ? (SPEED_STEPS[idx - 1] ?? s) : s;
+        });
+      } else if ((e.key === ">" || e.key === ".") && !inInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setSpeed((s) => {
+          const idx = (SPEED_STEPS as readonly number[]).indexOf(s);
+          return idx < SPEED_STEPS.length - 1 ? (SPEED_STEPS[idx + 1] ?? s) : s;
+        });
       }
     };
     window.addEventListener("keydown", onKey);

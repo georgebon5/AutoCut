@@ -1194,6 +1194,8 @@ function BulkActions({
   onRedo: () => void;
   onDirty?: () => void;
 }) {
+  const [showScore, setShowScore] = useState(false);
+  const [threshold, setThreshold] = useState(0.5);
   const busy = batchMut.isPending;
 
   const apply = (updates: Array<{ index: number; decision: Decision }>) => {
@@ -1202,75 +1204,133 @@ function BulkActions({
     onDirty?.();
   };
 
+  const previewKeep = segments.filter((s) => s.interest_score >= threshold).length;
+  const previewCut = segments.filter((s) => s.interest_score < threshold).length;
+
+  const applyScore = () => {
+    apply(
+      segments.flatMap((s, i) => {
+        const target: Decision = s.interest_score >= threshold ? "keep" : "cut";
+        return s.decision !== target ? [{ index: i, decision: target }] : [];
+      }),
+    );
+    setShowScore(false);
+  };
+
   const cls =
     "rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/60 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30";
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() =>
-          apply(
-            segments.flatMap((s, i) =>
-              s.decision !== "keep" ? [{ index: i, decision: "keep" as Decision }] : [],
-            ),
-          )
-        }
-        className={cls}
-        title="Κράτα όλα τα κομμάτια"
-      >
-        Κράτα όλα
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() =>
-          apply(
-            segments.flatMap((s, i) =>
-              s.decision !== "cut" ? [{ index: i, decision: "cut" as Decision }] : [],
-            ),
-          )
-        }
-        className={cls}
-        title="Κόψε όλα τα κομμάτια"
-      >
-        Κόψε όλα
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() =>
-          apply(
-            segments.map((s, i) => ({
-              index: i,
-              decision: (s.decision === "keep" ? "cut" : "keep") as Decision,
-            })),
-          )
-        }
-        className={cls}
-        title="Αντιστρέψε όλες τις επιλογές"
-      >
-        Αντιστροφή
-      </button>
-      <button
-        type="button"
-        disabled={undoCount === 0 || busy}
-        onClick={onUndo}
-        className={cls}
-        title="Undo τελευταία αλλαγή (Ctrl+Z)"
-      >
-        ↩{undoCount > 0 ? ` (${undoCount})` : ""}
-      </button>
-      <button
-        type="button"
-        disabled={redoCount === 0 || busy}
-        onClick={onRedo}
-        className={cls}
-        title="Redo (Ctrl+Shift+Z)"
-      >
-        ↪{redoCount > 0 ? ` (${redoCount})` : ""}
-      </button>
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            apply(
+              segments.flatMap((s, i) =>
+                s.decision !== "keep" ? [{ index: i, decision: "keep" as Decision }] : [],
+              ),
+            )
+          }
+          className={cls}
+          title="Κράτα όλα τα κομμάτια"
+        >
+          Κράτα όλα
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            apply(
+              segments.flatMap((s, i) =>
+                s.decision !== "cut" ? [{ index: i, decision: "cut" as Decision }] : [],
+              ),
+            )
+          }
+          className={cls}
+          title="Κόψε όλα τα κομμάτια"
+        >
+          Κόψε όλα
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() =>
+            apply(
+              segments.map((s, i) => ({
+                index: i,
+                decision: (s.decision === "keep" ? "cut" : "keep") as Decision,
+              })),
+            )
+          }
+          className={cls}
+          title="Αντιστρέψε όλες τις επιλογές"
+        >
+          Αντιστροφή
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setShowScore((v) => !v)}
+          title="Κόψε αυτόματα βάσει score"
+          className={[
+            "rounded-lg border px-2.5 py-1 text-[11px] font-medium transition disabled:cursor-not-allowed disabled:opacity-30",
+            showScore
+              ? "border-indigo-400/50 bg-indigo-500/15 text-indigo-200"
+              : "border-white/10 bg-white/5 text-white/60 hover:border-white/20 hover:bg-white/10 hover:text-white/80",
+          ].join(" ")}
+        >
+          ≥ score
+        </button>
+        <button
+          type="button"
+          disabled={undoCount === 0 || busy}
+          onClick={onUndo}
+          className={cls}
+          title="Undo τελευταία αλλαγή (Ctrl+Z)"
+        >
+          ↩{undoCount > 0 ? ` (${undoCount})` : ""}
+        </button>
+        <button
+          type="button"
+          disabled={redoCount === 0 || busy}
+          onClick={onRedo}
+          className={cls}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          ↪{redoCount > 0 ? ` (${redoCount})` : ""}
+        </button>
+      </div>
+
+      {showScore && (
+        <div className="flex items-center gap-2 rounded-xl border border-indigo-400/25 bg-indigo-500/8 px-3 py-2">
+          <span className="shrink-0 text-[11px] text-indigo-200/60">Κατώφλι</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={threshold}
+            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+            className="h-1.5 w-28 cursor-pointer accent-indigo-400"
+          />
+          <span className="w-8 font-mono text-[11px] text-indigo-300">{threshold.toFixed(2)}</span>
+          <span className="text-[10px] text-indigo-200/40">
+            <span className="text-emerald-300">{previewKeep} κρατά</span>
+            {" · "}
+            <span className="text-white/40">{previewCut} κόβει</span>
+          </span>
+          <button
+            type="button"
+            onClick={applyScore}
+            disabled={busy}
+            className="shrink-0 rounded-lg border border-indigo-400/40 bg-indigo-500/15 px-2.5 py-0.5 text-[11px] font-medium text-indigo-200 transition hover:border-indigo-400/60 hover:bg-indigo-500/25 disabled:opacity-30"
+          >
+            Εφάρμοσε
+          </button>
+        </div>
+      )}
     </div>
   );
 }

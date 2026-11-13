@@ -800,6 +800,8 @@ const SHORTCUT_GROUPS: { label: string; rows: { keys: string[]; desc: string }[]
     label: "Αναπαραγωγή",
     rows: [
       { keys: ["Space"], desc: "Play / Pause" },
+      { keys: [","], desc: "Μείωση ταχύτητας" },
+      { keys: ["."], desc: "Αύξηση ταχύτητας" },
       { keys: ["I"], desc: "Ορισμός αρχής loop" },
       { keys: ["O"], desc: "Ορισμός τέλους loop" },
     ],
