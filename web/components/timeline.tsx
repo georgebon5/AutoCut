@@ -45,6 +45,8 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
   const [showHelp, setShowHelp] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [autoFollow, setAutoFollow] = useState(true);
+  const [segmentSearch, setSegmentSearch] = useState("");
+  const [showSegSearch, setShowSegSearch] = useState(false);
   const pxPerSec = BASE_PX_PER_SECOND * zoom;
 
   // Auto-scroll: refs for the scrollable container and a flag to suppress
@@ -125,6 +127,35 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
     [edl.clips],
   );
   const selectedSeg = selected !== null ? edl.segments[selected] ?? null : null;
+
+  // Segment text search: find which segments contain the query in their transcript.
+  const segTextMatches = useMemo((): Set<number> | null => {
+    const q = segmentSearch.trim().toLowerCase();
+    if (!q) return null;
+    const result = new Set<number>();
+    edl.segments.forEach((seg, idx) => {
+      const t = edl.transcripts.find((tr) => tr.clip_id === seg.clip_id);
+      if (!t) return;
+      if (t.words.some((w) => w.start >= seg.start && w.start < seg.end && w.word.toLowerCase().includes(q)))
+        result.add(idx);
+    });
+    return result;
+  }, [segmentSearch, edl.segments, edl.transcripts]);
+
+  // First matching word per segment, used as a snippet label on the block.
+  const segTextSnippets = useMemo((): Map<number, string> => {
+    const q = segmentSearch.trim().toLowerCase();
+    if (!q || !segTextMatches) return new Map();
+    const map = new Map<number, string>();
+    edl.segments.forEach((seg, idx) => {
+      if (!segTextMatches.has(idx)) return;
+      const t = edl.transcripts.find((tr) => tr.clip_id === seg.clip_id);
+      if (!t) return;
+      const match = t.words.find((w) => w.start >= seg.start && w.start < seg.end && w.word.toLowerCase().includes(q));
+      if (match) map.set(idx, match.word);
+    });
+    return map;
+  }, [segmentSearch, segTextMatches, edl.segments, edl.transcripts]);
 
   // Map output-video currentTime to a source position within one clip, so we
   // can draw a playback cursor on the matching ClipRow / HookRow.
@@ -382,11 +413,16 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         setAutoFollow((v) => !v);
+      } else if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        setShowSegSearch((v) => { if (!v) setSegmentSearch(""); return !v; });
       } else if (e.key === "?" || e.key === "h" || e.key === "H") {
         e.preventDefault();
         setShowHelp((v) => !v);
       } else if (e.key === "Escape") {
-        if (multiSel.size > 0) { setMultiSel(new Set()); } else { setShowHelp(false); }
+        if (showSegSearch) { setShowSegSearch(false); setSegmentSearch(""); }
+        else if (multiSel.size > 0) { setMultiSel(new Set()); }
+        else { setShowHelp(false); }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -415,6 +451,19 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
           {activeCursor !== null ? (
             <FollowButton active={autoFollow} onClick={() => setAutoFollow((v) => !v)} />
           ) : null}
+          <button
+            type="button"
+            onClick={() => setShowSegSearch((v) => { if (!v) setSegmentSearch(""); return !v; })}
+            title="Αναζήτηση κειμένου σε κομμάτια (T)"
+            className={[
+              "rounded-lg border px-2.5 py-1 font-mono text-[11px] transition",
+              showSegSearch
+                ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200"
+                : "border-white/10 bg-white/5 text-white/50 hover:border-white/20 hover:text-white/80",
+            ].join(" ")}
+          >
+            ⌕
+          </button>
           <ZoomControl zoom={zoom} onChange={setZoom} />
           <BulkActions
             segments={edl.segments}
@@ -427,6 +476,33 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
           />
         </div>
       </div>
+
+      {showSegSearch && (
+        <div className="flex items-center gap-2 rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-2">
+          <span className="font-mono text-sm text-fuchsia-300/50">⌕</span>
+          <input
+            autoFocus
+            type="text"
+            value={segmentSearch}
+            onChange={(e) => setSegmentSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") { setShowSegSearch(false); setSegmentSearch(""); } }}
+            placeholder="Αναζήτηση κειμένου σε κομμάτια…"
+            className="min-w-0 flex-1 bg-transparent text-sm text-white/90 placeholder-white/25 outline-none"
+          />
+          {segTextMatches !== null && (
+            <span className="shrink-0 font-mono text-xs text-fuchsia-300/60">
+              {segTextMatches.size} / {edl.segments.length}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { setShowSegSearch(false); setSegmentSearch(""); }}
+            className="shrink-0 text-xs text-white/25 transition hover:text-white/70"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {multiSel.size > 0 && (
         <div className="flex items-center gap-2 rounded-xl border border-orange-400/25 bg-orange-500/8 px-3 py-1.5">
@@ -507,6 +583,8 @@ export default function Timeline({ jobId, preset, edl, currentTime, onDirty, onS
                   : null
               }
               multiSel={multiSel}
+              segTextMatches={segTextMatches}
+              segTextSnippets={segTextSnippets}
               onSelect={(index) => { setMultiSel(new Set()); selectAndSeek(index); }}
               onShiftSelect={(index) => {
                 setMultiSel((ms) => { const s = new Set(ms); if (s.has(index)) s.delete(index); else s.add(index); return s; });
@@ -672,6 +750,8 @@ function ClipRow({
   items,
   selectedIndex,
   multiSel,
+  segTextMatches,
+  segTextSnippets,
   cursorX,
   pxPerSec,
   onSelect,
@@ -687,6 +767,8 @@ function ClipRow({
   items: { seg: SegmentDict; index: number }[];
   selectedIndex: number | null;
   multiSel: Set<number>;
+  segTextMatches: Set<number> | null;
+  segTextSnippets: Map<number, string>;
   cursorX: number | null;
   pxPerSec: number;
   onSelect: (index: number) => void;
@@ -790,11 +872,14 @@ function ClipRow({
           const active = selectedIndex === index;
           const inMultiSel = multiSel.has(index);
           const next: Decision = keep ? "cut" : "keep";
+          const isTextMatch = segTextMatches === null || segTextMatches.has(index);
+          const dimmed = !isTextMatch && !active && !inMultiSel;
           // Score drives opacity for kept blocks: strong keeps are vivid,
           // borderline keeps are more transparent. Clamp to [0.25, 1].
           const scoreOpacity = keep
             ? Math.max(0.25, Math.min(1.0, 0.25 + seg.interest_score * 0.75))
             : 1;
+          const snippet = segTextSnippets.get(index);
           const dur = seg.end - seg.start;
           return (
             <button
@@ -815,8 +900,7 @@ function ClipRow({
                 left,
                 width: w,
                 height: ROW_HEIGHT_PX,
-                // Active selection always shows at full opacity regardless of score.
-                opacity: active ? 1 : scoreOpacity,
+                opacity: dimmed ? 0.07 : active ? 1 : scoreOpacity,
               }}
               title={`${seg.start.toFixed(2)}–${seg.end.toFixed(2)}s · score ${seg.interest_score.toFixed(2)} · ${seg.decision} — Alt+Click to split`}
               className={[
@@ -835,6 +919,15 @@ function ClipRow({
                   aria-hidden
                 >
                   {seg.interest_score.toFixed(2)}
+                </span>
+              ) : null}
+              {/* Text-search snippet — shown when this block matches */}
+              {snippet && w >= 32 ? (
+                <span
+                  className="pointer-events-none absolute inset-x-0 top-1 overflow-hidden text-ellipsis whitespace-nowrap px-1 text-center font-mono text-[9px] text-fuchsia-200/90 leading-none"
+                  aria-hidden
+                >
+                  "{snippet}"
                 </span>
               ) : null}
               {/* Duration label for very wide blocks */}
@@ -1648,6 +1741,7 @@ const SHORTCUTS: ShortcutRow[] = [
   { keys: ["["],             desc: "Άλμα στην αρχή του segment" },
   { keys: ["]"],             desc: "Άλμα στο τέλος του segment" },
   { keys: ["Ctrl+scroll"],   desc: "Zoom in/out στο timeline" },
+  { keys: ["T"],             desc: "Αναζήτηση κειμένου σε κομμάτια" },
   { keys: ["F"],             desc: "Toggle auto-scroll (follow cursor)" },
   { keys: ["H", "?"],        desc: "Αυτό το παράθυρο" },
   { keys: ["Esc"],           desc: "Κλείσιμο" },

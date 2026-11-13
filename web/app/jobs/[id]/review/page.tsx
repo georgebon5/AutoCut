@@ -815,6 +815,7 @@ const SHORTCUT_GROUPS: { label: string; rows: { keys: string[]; desc: string }[]
       { keys: ["]"], desc: "Seek στο τέλος segment" },
       { keys: ["C"], desc: "Επόμενο cut" },
       { keys: ["Shift", "C"], desc: "Προηγούμενο cut" },
+      { keys: ["T"], desc: "Αναζήτηση κειμένου" },
     ],
   },
   {
