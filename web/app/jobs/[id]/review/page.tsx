@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -37,6 +38,7 @@ export default function ReviewPage() {
   const qc = useQueryClient();
   const router = useRouter();
   const [showClone, setShowClone] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const [preset, setPreset] = useState<string | null>(null);
   // UI preferences are persisted per-job in localStorage so a page reload
@@ -73,6 +75,24 @@ export default function ReviewPage() {
   useEffect(() => {
     setDirty(false);
   }, [preset]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const inInput = !!(t && (
+        t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable
+      ));
+      if (e.key === "?" && !inInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+      }
+      if (e.key === "Escape" && showHelp) {
+        setShowHelp(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHelp]);
 
   const jobQuery = useQuery({
     queryKey: ["job", jobId],
@@ -149,6 +169,7 @@ export default function ReviewPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-12">
+      {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
       <header className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <Link
@@ -224,14 +245,24 @@ export default function ReviewPage() {
             dirty={dirty}
             onClick={() => renderMut.mutate()}
           />
-          <button
-            type="button"
-            onClick={() => setShowClone((v) => !v)}
-            disabled={job?.status !== "done"}
-            className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            {showClone ? "Ακύρωση" : "⟳ Clone job"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setShowClone((v) => !v)}
+              disabled={job?.status !== "done"}
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              {showClone ? "Ακύρωση" : "⟳ Clone job"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHelp((v) => !v)}
+              title="Συντομεύσεις πληκτρολογίου (?)"
+              className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-white/50 transition hover:border-white/20 hover:bg-white/10 hover:text-white/80"
+            >
+              ?
+            </button>
+          </div>
         </div>
       </header>
 
@@ -756,6 +787,108 @@ function ClonePanel({
         </button>
       </div>
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts help overlay
+// ---------------------------------------------------------------------------
+
+const SHORTCUT_GROUPS: { label: string; rows: { keys: string[]; desc: string }[] }[] = [
+  {
+    label: "Αναπαραγωγή",
+    rows: [
+      { keys: ["Space"], desc: "Play / Pause" },
+      { keys: ["I"], desc: "Ορισμός αρχής loop" },
+      { keys: ["O"], desc: "Ορισμός τέλους loop" },
+    ],
+  },
+  {
+    label: "Πλοήγηση",
+    rows: [
+      { keys: ["J"], desc: "Προηγούμενο segment" },
+      { keys: ["L"], desc: "Επόμενο segment" },
+      { keys: ["["], desc: "Seek στην αρχή segment" },
+      { keys: ["]"], desc: "Seek στο τέλος segment" },
+      { keys: ["C"], desc: "Επόμενο cut" },
+      { keys: ["Shift", "C"], desc: "Προηγούμενο cut" },
+    ],
+  },
+  {
+    label: "Επεξεργασία",
+    rows: [
+      { keys: ["K"], desc: "Toggle keep / cut" },
+      { keys: ["D"], desc: "Batch toggle επιλογής" },
+      { keys: ["Shift", "J"], desc: "Επέκταση επιλογής ↑" },
+      { keys: ["Shift", "L"], desc: "Επέκταση επιλογής ↓" },
+      { keys: ["Escape"], desc: "Καθαρισμός επιλογής" },
+    ],
+  },
+  {
+    label: "Transcript",
+    rows: [
+      { keys: ["Ctrl/⌘", "F"], desc: "Αναζήτηση / αντικατάσταση" },
+      { keys: ["⎘"], desc: "Αντιγραφή κειμένου" },
+    ],
+  },
+];
+
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="glass-card w-full max-w-lg rounded-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.15em] text-white/60">
+            Συντομεύσεις πληκτρολογίου
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-white/30 transition hover:text-white/70"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+          {SHORTCUT_GROUPS.map((g) => (
+            <div key={g.label}>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-white/35">
+                {g.label}
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {g.rows.map((r) => (
+                  <li key={r.desc} className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-white/55">{r.desc}</span>
+                    <span className="flex shrink-0 gap-1">
+                      {r.keys.map((k) => (
+                        <kbd
+                          key={k}
+                          className="rounded border border-white/15 bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-white/50"
+                        >
+                          {k}
+                        </kbd>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <p className="mt-5 text-center text-[10px] text-white/20">
+          Πάτα <kbd className="rounded border border-white/10 bg-white/[0.04] px-1 font-mono text-[10px] text-white/30">?</kbd> ή <kbd className="rounded border border-white/10 bg-white/[0.04] px-1 font-mono text-[10px] text-white/30">Esc</kbd> για κλείσιμο
+        </p>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
